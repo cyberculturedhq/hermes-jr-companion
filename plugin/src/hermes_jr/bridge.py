@@ -205,13 +205,15 @@ class Bridge:
             await asyncio.sleep(1)
 
     async def run(self):
+        from .setup_jobs import watch as watch_setup
         from .cleanup import watch as watch_cleanup
         from .updates import watch as watch_updates
         from .diagnostics import watch as watch_health
         tasks = [asyncio.create_task(self.relay()), asyncio.create_task(self.maintenance()),
                  asyncio.create_task(watch_updates(self.state, self.client)),
                  asyncio.create_task(watch_health(self.state, self.client)),
-                 asyncio.create_task(watch_cleanup(self.state, self.service))]
+                 asyncio.create_task(watch_cleanup(self.state, self.service)),
+                 asyncio.create_task(watch_setup(self.state, self.service))]
         try:
             await asyncio.gather(*tasks)
         finally:

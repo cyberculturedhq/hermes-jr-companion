@@ -32,11 +32,17 @@ export class ServiceAdmission extends DurableObject<Env> {
     });
   }
   admit(id: string): boolean {
+    return this.admissionResult(id) === "admitted";
+  }
+  admissionResult(id: string): "admitted" | "unknown" | "capacity" {
     return this.ctx.storage.transactionSync(() => {
-      if (this.used("requests") >= SERVICE_LIMITS.requestsPerDay || !this.ctx.storage.sql.exec("SELECT id FROM admitted WHERE id = ?", id).toArray().length) {
-        this.increment("rejected"); return false;
+      if (!this.ctx.storage.sql.exec("SELECT id FROM admitted WHERE id = ?", id).toArray().length) {
+        this.increment("rejected"); return "unknown";
       }
-      this.increment("requests"); return true;
+      if (this.used("requests") >= SERVICE_LIMITS.requestsPerDay) {
+        this.increment("rejected"); return "capacity";
+      }
+      this.increment("requests"); return "admitted";
     });
   }
   remove(id: string): void {

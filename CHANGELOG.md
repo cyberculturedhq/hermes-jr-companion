@@ -1,3 +1,10 @@
+# 0.9.0
+
+- Move numeric pairing into the companion service so terminal commands return the code before phone approval.
+- Add bounded JSON results and a short `pair --ticket … --status` command; only authenticated completion reports connected.
+- Preserve setup across service restarts and distinguish expiry from success.
+- Correct relay responses for missing installations versus temporary service capacity.
+
 # 0.8.0
 
 - Add public, phone-bound setup tickets and a resumable numeric-comparison pairing flow.
