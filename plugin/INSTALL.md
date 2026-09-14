@@ -1,3 +1,11 @@
+## Pairing readiness and automatic completion (0.10.0)
+
+Before creating a ticket pairing, the CLI verifies the actual authenticated loopback WebSocket with a bounded RPC probe. `hermes jr doctor` now includes `dashboard_rpc`; a readable page or running bridge alone is insufficient. The Hermes backend must have persistent supervision, not just a process started inside an agent terminal call. Preserve existing supervisors; when absent, configure a user launchd/systemd service for `hermes serve --host 127.0.0.1 --port PORT`. Do not expose a new public listener.
+
+The pending/ready JSON includes `watch_command`. Before displaying the code or ending the turn, run it with the Hermes terminal tool using `background=true, notify_on_complete=true` and verify the returned notification flag is enabled. This read-only waiter tracks the same job without carrying the ticket or authorizing anything. Its exit triggers Hermes's native background-completion notification. If the runtime reports notifications unsupported, supervise that process explicitly; never promise an automatic follow-up that has not been registered. Do not ask the user to report confirmation.
+
+Connected now requires successful Hermes profile discovery through the phone's encrypted connection, in addition to phone authentication. A dead backend must not produce a successful pairing status. The watcher returns failure/expiry rather than reporting success.
+
 # Install and test with Hermes
 
 This is a development prototype. Python 3.10+ and a recent Hermes with native plugin hooks, the `hermes plugins` CLI, and dashboard plugin APIs are required. Installation and configuration are per profile; private companion state is shared under the Hermes root. Automatic startup and crash recovery are provided by `hermes jr service install`. New profiles still need explicit plugin installation/activation; include that step when creating them.
@@ -8,15 +16,15 @@ This is a development prototype. Python 3.10+ and a recent Hermes with native pl
 
 ## Phone-bound setup (when the prompt contains an HJ1 ticket)
 
-Use companion **0.9.0 or newer**. The ticket is public and belongs to the iPhone that generated it. Preserve existing configuration and the configured service origin. Verify `hermes jr doctor` and `hermes jr service status`; restart an older running companion service after updating so it loads the new pairing worker.
+Use companion **0.10.0 or newer**. The ticket is public and belongs to the iPhone that generated it. Preserve existing configuration and the configured service origin. Verify `hermes jr doctor` and `hermes jr service status`; restart an older running companion service after updating so it loads the new pairing worker.
 
-Run `hermes jr pair --ticket 'HJ1.…'` with the exact ticket. This bounded command queues pairing in the companion service and waits up to eight seconds for the code, after a bounded ticket-verification request. It returns JSON and **exits before phone approval**. No background terminal tool or streamed output is required. The installed companion service keeps the pairing alive.
+Run `hermes jr pair --ticket 'HJ1.…'` with the exact ticket. This bounded command queues pairing in the companion service and waits up to eight seconds for the code, after a bounded ticket-verification request. It returns JSON and **exits before phone approval**. No streamed output is needed to obtain the code. Register the separate background completion watcher described above. The installed companion service keeps the pairing alive.
 
 Handle the returned `status`:
 
 - `pending`: the phone has not finished joining the exchange. Wait a few seconds and run `hermes jr pair --ticket 'HJ1.…' --status` with the same ticket. Do not create a duplicate attempt.
-- `ready`: immediately show the returned `code` verbatim in chat: “Check that these three groups match in Hermes Jr., then tap **It’s correct**.” This is a comparison, not an OTP to type. Never invent a code or approve on the user's behalf. Continue checking the short `--status` command while awaiting phone confirmation.
-- `connected`: the companion observed the authenticated phone connection. Only now say pairing completed.
+- `ready`: immediately show the returned `code` verbatim in chat: “Check that these three groups match in Hermes Jr., then tap **It’s correct**.” This is a comparison, not an OTP to type. Never invent a code or approve on the user's behalf. The registered completion watcher reports the outcome; do not ask the user to report confirmation.
+- `connected`: the companion observed authenticated profile discovery from the phone. Only now say pairing completed.
 - `expired` or `failed`: setup did not complete. Ask the user to create a fresh prompt in Jr.; preserve the installed companion. These results exit nonzero.
 - `not_found`: no service-owned job exists for this ticket. Start it with the command without `--status`.
 

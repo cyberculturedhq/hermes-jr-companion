@@ -86,7 +86,7 @@ async def run(state, service, ticket, name, report=None):
             try:
                 remote = await broker.request("GET", suffix, credential=credential)
                 if remote["status"] in {"cancelled", "complete"}:
-                    if saved.get("device_id") and (state.device(saved["device_id"]) or {}).get("approved"):
+                    if saved.get("device_id") and (state.device(saved["device_id"]) or {}).get("approved") and state.get("setup-ready/" + saved["device_id"]):
                         state.set(record_key, {"terminal": True, "status": "connected", "expires_at": intent["expires_at"]})
                         if report: report("connected")
                         else: print("You’re connected. Your conversations are ready in Hermes Jr.", flush=True)
@@ -128,7 +128,7 @@ async def run(state, service, ticket, name, report=None):
                             saved["envelope"] = crypto.encrypt_enrollment(host_private, crypto.decode(intent["phone_public_key"], 32), transcript, payload)
                             state.set(record_key, saved)
                         await broker.request("PUT", suffix + "/enrollment", {"envelope": saved["envelope"]}, credential)
-                        if (state.device(saved["device_id"]) or {}).get("approved"):
+                        if (state.device(saved["device_id"]) or {}).get("approved") and state.get("setup-ready/" + saved["device_id"]):
                             state.set(record_key, {"terminal": True, "status": "connected", "expires_at": intent["expires_at"]})
                             if report: report("connected")
                             else: print("You’re connected. Your conversations are ready in Hermes Jr.", flush=True)

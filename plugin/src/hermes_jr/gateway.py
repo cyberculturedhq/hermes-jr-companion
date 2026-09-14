@@ -86,6 +86,26 @@ class Gateway:
         return await self.client.ws_connect(self.origin + "/api/ws", params=query, headers=self.headers,
                                             max_msg_size=MAX_MESSAGE, heartbeat=20)
 
+    async def probe(self):
+        """Verify the actual RPC transport, not just the dashboard HTML page."""
+        await asyncio.wait_for(self._probe(), 10)
+
+    async def _probe(self):
+        socket = await self.socket()
+        try:
+            await socket.send_json({"jsonrpc": "2.0", "id": "jr-health", "method": "gateway.ping", "params": {}})
+            async for message in socket:
+                if message.type != aiohttp.WSMsgType.TEXT:
+                    raise ConnectionError("Hermes closed the diagnostic connection")
+                value = json.loads(message.data)
+                if isinstance(value, dict) and value.get("id") == "jr-health":
+                    if value.get("result") != {"ok": True}:
+                        raise ValueError("Hermes did not accept the diagnostic ping")
+                    return
+            raise ConnectionError("Hermes closed the diagnostic connection")
+        finally:
+            await socket.close()
+
     async def http(self, device_id, envelope):
         method, path = envelope.get("method", "GET"), envelope.get("path", "")
         query, body = envelope.get("query", {}), envelope.get("body", {})

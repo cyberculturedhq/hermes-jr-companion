@@ -42,6 +42,7 @@ def configure_parser(parser):
     pair.add_argument("--status", action="store_true", help="Read the service-owned pairing result for --ticket; never waits for approval")
     pair.add_argument("--no-wait", action="store_true", help="Return after opening the page instead of waiting for the phone")
     output = pair.add_mutually_exclusive_group()
+    output.add_argument("--watch", metavar="JOB_ID", help="Wait for an existing ticket pairing to finish; run as a Hermes background task with completion notifications")
     output.add_argument("--ticket", help="Pair with the iPhone that created this public HJ1 setup ticket; compare the displayed codes")
     output.add_argument("--browser", action="store_true", help="Open a private branded QR page (default)")
     output.add_argument("--json", action="store_true", help="Output invitation JSON for automation")
@@ -133,6 +134,15 @@ async def execute(args):
             state.settings(values)
             print("Companion configured. Enable the Hermes plugin and restart Hermes, then run: hermes jr service install")
         elif args.jr_command == "pair":
+            if args.watch:
+                if args.status or args.no_wait:
+                    raise ValueError("--watch cannot be combined with --status or --no-wait")
+                from .setup_jobs import wait_for_completion
+                result = await wait_for_completion(state, args.watch)
+                print(json.dumps(result, ensure_ascii=False), flush=True)
+                if result["status"] != "connected":
+                    raise SystemExit(1)
+                return
             if getattr(args, "ticket", None):
                 if args.no_wait:
                     raise ValueError("Ticket pairing already returns before approval; omit --no-wait")

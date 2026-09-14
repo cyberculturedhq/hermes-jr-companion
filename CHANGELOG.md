@@ -1,3 +1,10 @@
+## 0.10.0
+
+- Verify authenticated dashboard RPC before ticket pairing and expose its health in doctor.
+- Require successful phone-side profile discovery before reporting connected.
+- Add a read-only completion watcher for Hermes background notifications.
+- Replace misleading session-retry errors with the actual companion/backend boundary.
+
 # 0.9.0
 
 - Move numeric pairing into the companion service so terminal commands return the code before phone approval.
