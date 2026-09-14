@@ -41,6 +41,7 @@ def configure_parser(parser):
     pair.add_argument("--name", default="iPhone")
     pair.add_argument("--no-wait", action="store_true", help="Return after opening the page instead of waiting for the phone")
     output = pair.add_mutually_exclusive_group()
+    output.add_argument("--ticket", help="Pair with the iPhone that created this public HJ1 setup ticket; compare the displayed codes")
     output.add_argument("--browser", action="store_true", help="Open a private branded QR page (default)")
     output.add_argument("--json", action="store_true", help="Output invitation JSON for automation")
     output.add_argument("--url", action="store_true", help="Output a hermes-jr:// pairing URL without opening a browser")
@@ -131,6 +132,12 @@ async def execute(args):
             state.settings(values)
             print("Companion configured. Enable the Hermes plugin and restart Hermes, then run: hermes jr service install")
         elif args.jr_command == "pair":
+            if getattr(args, "ticket", None):
+                if args.no_wait:
+                    raise ValueError("Code comparison must wait for the phone; omit --no-wait")
+                from .setup_pairing import run
+                await run(state, service, args.ticket, args.name)
+                return
             from .secure_channel import public_key
             if not state.get("relay_enabled", False):
                 raise ValueError("Remote access is disabled; enable it with hermes jr setup --relay")

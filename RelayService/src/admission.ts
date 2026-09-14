@@ -3,7 +3,7 @@ import { DurableObject } from "cloudflare:workers";
 // The coordination atom is the service admission budget. Encrypted WebSocket frames
 // stay on their installation objects and never pass through this directory.
 export const SERVICE_LIMITS = { registrationsPerDay: 25, installationsLifetime: 250, requestsPerDay: 100_000, pushesPerDay: 3_000 };
-type Counter = "registrations" | "requests" | "pushes" | "rejected";
+type Counter = "registrations" | "requests" | "pushes" | "rejected" | "setups";
 export class ServiceAdmission extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -42,6 +42,15 @@ export class ServiceAdmission extends DurableObject<Env> {
   remove(id: string): void {
     // Never refund the lifetime budget: repeated create/delete must not allocate unlimited DOs.
     this.ctx.storage.sql.exec("DELETE FROM admitted WHERE id = ?", id);
+  }
+  setup(create: boolean): boolean {
+    return this.ctx.storage.transactionSync(() => {
+      if ((create && this.env.REGISTRATIONS_ENABLED !== "true") || this.used("requests") >= SERVICE_LIMITS.requestsPerDay
+        || (create && this.used("setups") >= 100)) { this.increment("rejected"); return false; }
+      this.increment("requests");
+      if (create) this.increment("setups");
+      return true;
+    });
   }
   push(): boolean {
     return this.ctx.storage.transactionSync(() => {

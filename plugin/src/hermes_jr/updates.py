@@ -13,7 +13,7 @@ from .release_signature import verify, signature_from_body
 REPOSITORY = 'cyberculturedhq/hermes-jr-companion'
 API = 'https://api.github.com/repos/' + REPOSITORY
 INTERVAL = 24 * 60 * 60
-VERSION = '0.7.0'
+VERSION = '0.8.0'
 
 
 def version(value):

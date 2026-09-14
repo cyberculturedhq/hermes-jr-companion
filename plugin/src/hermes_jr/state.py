@@ -54,6 +54,7 @@ class State:
                     approved INTEGER NOT NULL DEFAULT 0, revoked INTEGER NOT NULL DEFAULT 0,
                     push_enabled INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS automatic_pairing (device_id TEXT PRIMARY KEY);
+                CREATE TABLE IF NOT EXISTS expected_pairing_keys (device_id TEXT PRIMARY KEY, public_key TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS notification_keys (
                     device_id TEXT PRIMARY KEY, key_id TEXT NOT NULL, secret TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS notification_details (
@@ -105,7 +106,7 @@ class State:
         with self.connect() as db:
             return [dict(row) for row in db.execute("SELECT * FROM devices WHERE revoked=0 ORDER BY created")]
 
-    def add_device(self, device_id, name, service_token, *, paired=False, secret=None, expires=0, automatic=False):
+    def add_device(self, device_id, name, service_token, *, paired=False, secret=None, expires=0, automatic=False, expected_key=None):
         local = token()
         with self.connect() as db:
             db.execute("INSERT INTO devices(id,name,local_digest,service_token,pair_digest,pair_expires,approved,created) VALUES(?,?,?,?,?,?,?,?)",
@@ -115,6 +116,11 @@ class State:
                 if not secret or paired or expires <= time.time():
                     raise ValueError("Automatic pairing requires a live one-time invitation")
                 db.execute("INSERT INTO automatic_pairing(device_id) VALUES(?)", (device_id,))
+            if expected_key is not None:
+                if len(expected_key) != 32 or not automatic:
+                    raise ValueError("Phone-bound pairing requires a 32-byte key and a live invitation")
+                db.execute("INSERT INTO expected_pairing_keys VALUES(?,?)",
+                           (device_id, base64.urlsafe_b64encode(expected_key).decode().rstrip("=")))
         return local
 
     def authenticate(self, device_id, credential):
@@ -130,6 +136,9 @@ class State:
             row = db.execute("SELECT * FROM devices WHERE id=? AND revoked=0", (device_id,)).fetchone()
             if not row:
                 raise PermissionError("Unknown device")
+            expected = db.execute("SELECT public_key FROM expected_pairing_keys WHERE device_id=?", (device_id,)).fetchone()
+            if expected and not hmac.compare_digest(expected[0], encoded):
+                raise PermissionError("This setup belongs to a different phone")
             if row["public_key"]:
                 if not hmac.compare_digest(row["public_key"], encoded):
                     raise PermissionError("Device key does not match")
@@ -172,6 +181,13 @@ class State:
             rows = db.execute("SELECT id FROM devices WHERE revoked=0 AND approved=0 AND pair_expires>0 AND pair_expires<=?", (time.time(),)).fetchall()
             for row in rows:
                 self._revoke_in(db, row[0])
+            # Setup keys are private, short-lived state, including after an interrupted CLI.
+            for row in db.execute("SELECT key,value FROM settings WHERE key LIKE 'setup/%'").fetchall():
+                value = json.loads(row["value"])
+                if value.get("expires_at", 0) <= time.time():
+                    db.execute("DELETE FROM settings WHERE key=?", (row["key"],))
+                elif value.get("deadline", float("inf")) <= time.time():
+                    db.execute("UPDATE settings SET value=? WHERE key=?", (json.dumps({"terminal": True, "expires_at": value["expires_at"]}), row["key"]))
             return len(rows)
 
     def pending_deletions(self):

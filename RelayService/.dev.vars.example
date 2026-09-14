@@ -6,3 +6,6 @@ APNS_PRIVATE_KEY=""
 
 # Random 32-byte base64url token; only the operator receives this, never a client.
 OPERATOR_TOKEN=""
+
+# Separate Ed25519 PKCS#8 key encoded as base64url. See Protocol/SETUP.md.
+SETUP_TICKET_PRIVATE_KEY=""

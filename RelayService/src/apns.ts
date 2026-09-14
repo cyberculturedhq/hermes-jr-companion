@@ -90,6 +90,14 @@ export class APNsProviderToken extends DurableObject<Env> {
 
 /** Fixed APNs hosts and topic. Clients cannot supply endpoints, text, or APNs credentials. */
 export async function sendPush(env: Env, token: string, environment: PushEnvironment, reference: string, encrypted?: EncryptedNotification): Promise<PushResult> {
+  return deliverPush(env, token, environment, reference, encrypted);
+}
+
+export async function sendSetupPush(env: Env, token: string, environment: PushEnvironment, intent: string, expires: number): Promise<PushResult> {
+  return deliverPush(env, token, environment, intent, undefined, expires);
+}
+
+async function deliverPush(env: Env, token: string, environment: PushEnvironment, reference: string, encrypted?: EncryptedNotification, setupExpires?: number): Promise<PushResult> {
   if (!pushAvailable(env) || !pushEnvironmentAllowed(env, environment)) {
     return { status: "unavailable", stage: null, apns_status: null, reason: null };
   }
@@ -110,12 +118,12 @@ export async function sendPush(env: Env, token: string, environment: PushEnviron
         "apns-topic": env.APNS_TOPIC,
         "apns-push-type": "alert",
         "apns-priority": "10",
-        "apns-expiration": String(Math.floor(Date.now() / 1000) + 3600),
-        "apns-collapse-id": "hermes-jr-update",
+        "apns-expiration": String(setupExpires ?? Math.floor(Date.now() / 1000) + 3600),
+        "apns-collapse-id": setupExpires ? "hermes-jr-setup" : "hermes-jr-update",
       },
       body: JSON.stringify({
-        aps: { alert: { title: "Hermes Jr.", body: "You have a new notification. Open the app for details." }, sound: "default", ...(encrypted ? { "mutable-content": 1 } : {}) },
-        reference,
+        aps: { alert: { title: "Hermes Jr.", body: setupExpires ? "Hermes is ready. Open the app to compare your pairing codes." : "You have a new notification. Open the app for details." }, sound: "default", ...(encrypted ? { "mutable-content": 1 } : {}) },
+        ...(setupExpires ? { pairing_ready: reference } : { reference }),
         ...(encrypted ? { encrypted } : {}),
       }),
     });

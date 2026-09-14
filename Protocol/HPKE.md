@@ -20,14 +20,17 @@ plaintext lengths. TLS is still required between each endpoint and the relay.
 
 ## Caller contract
 
-The phone must obtain and pin the host's 32-byte X25519 public key from the
-host's pairing QR. Do not replace that pinned key based on relay responses.
+The phone must authenticate the host's 32-byte X25519 public key through the
+private pairing QR or the explicit numeric comparison in [SETUP.md](SETUP.md).
+Do not replace an established pinned key based on relay responses.
 Store the phone's private key using the iOS Keychain. The host persists its
 private key and authorized-device registry locally with restrictive permissions.
 The crypto module does not implement secret storage or pairing-secret storage.
 
-Pairing invitations must be random, single use, expire, and require explicit
-host approval. The first encrypted authentication payload is caller-owned JSON,
+Pairing invitations must be random, single use, and expire. A private QR scan
+can authorize automatic pairing; machine-readable/manual invitations retain the
+manual approval path. Numeric setup requires the phone’s explicit code comparison
+and binds the invitation to its expected public key. The first encrypted authentication payload is caller-owned JSON,
 for example `{"pairing_secret":"...","device_name":"...","device_id":"..."}`.
 A registered device can omit the pairing secret. IDs and names do not authorize
 anything: the caller binds them to the cryptographically authenticated phone key.

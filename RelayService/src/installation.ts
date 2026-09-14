@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { pushAvailable, pushEnvironmentAllowed, sendPush, type EncryptedNotification, type PushEnvironment, type PushResult } from "./apns";
 import { exactKeys, failure, handleErrors, HttpError, json, readJson } from "./http";
 import { bearer, bytesUuid, LIMITS, newToken, REFERENCE_PATTERN, routedRecord, sameHash, tokenHash, UUID_PATTERN } from "./protocol";
+import { key32 } from "./setup-ticket";
 
 type Installation = { id: string; host_hash: string };
 type Device = { id: string; token_hash: string; push_token: string | null; push_env: PushEnvironment | null; created_at: number };
@@ -41,6 +42,11 @@ export class InstallationRelay extends DurableObject<Env> {
     if (!UUID_PATTERN.test(id) || !/^[A-Za-z0-9_-]{43}$/.test(hostHash)) throw new Error("Invalid registration");
     if (this.installation()) throw new Error("Installation exists");
     this.ctx.storage.sql.exec("INSERT INTO installation (id, host_hash) VALUES (?, ?)", id, hostHash);
+  }
+
+  authorizeSetup(hostHash: string): boolean {
+    const current = this.installation();
+    return current !== undefined && sameHash(hostHash, current.host_hash);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -96,6 +102,21 @@ export class InstallationRelay extends DurableObject<Env> {
         return json({ devices: this.ctx.storage.sql.exec<Device>("SELECT * FROM devices ORDER BY created_at").toArray().map((entry) => ({
           device_id: entry.id, push_registered: Boolean(entry.push_token), connected: Boolean(this.deviceSocket(entry.id)),
         })) });
+      }
+      if (deviceMatch && !deviceMatch[2] && request.method === "PUT") {
+        if (!isHost) return failure(403, "host_required");
+        exactKeys(body!, ["device_token"]);
+        if (!key32(body!.device_token)) return failure(400, "invalid_token");
+        const desiredHash = await tokenHash(body!.device_token);
+        // Recheck authority after hashing. Retries never rotate an existing credential.
+        if (!this.authorizeSetup(hash)) return failure(401, "unauthorized");
+        const existing = this.device(deviceId!);
+        if (existing && !sameHash(existing.token_hash, desiredHash)) return failure(409, "device_exists");
+        if (!existing) {
+          if (this.ctx.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM devices").one().count >= LIMITS.devices) return failure(409, "device_limit");
+          this.ctx.storage.sql.exec("INSERT INTO devices (id, token_hash, created_at) VALUES (?, ?, ?)", deviceId!, desiredHash, Date.now());
+        }
+        return json({ status: "ok" });
       }
       if (deviceMatch && !deviceMatch[2] && request.method === "DELETE") {
         if (!isHost) return failure(403, "host_required");
