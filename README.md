@@ -8,7 +8,7 @@ Connect to your Hermes agent from your phone and get notified when a conversatio
 
 Your Hermes computer and paired iPhone handle the private content. Our relay delivers encrypted data.
 
-- **Encrypted conversations:** remote access uses end-to-end encryption with a host identity pinned by the private QR you scan. A relay credential alone cannot unlock your agent.
+- **Encrypted conversations:** remote access uses end-to-end encryption with a host identity verified by matching codes on both devices or by scanning a private QR. A relay credential alone cannot unlock your agent.
 - **Encrypted notification details:** profile names, conversation titles, and event types are encrypted on your Hermes computer and decrypted on your iPhone. Our relay and Apple’s push servers receive ciphertext and a generic fallback, not those details. Notification payloads are padded to a fixed size.
 - **Keys stay with your devices:** notification keys are stored in the iPhone’s Keychain and the companion’s private local state, never sent to our relay. Phones receive separate keys.
 - **Code you can inspect:** the companion and relay are open source. You can review them, fork them, or host the service yourself. The iOS source will also be published.
@@ -21,11 +21,13 @@ Read [how notification encryption works](Protocol/NOTIFICATIONS.md) and the [rel
 
 ## Set it up with Hermes
 
-Give your Hermes agent this prompt:
+In the updated Jr. app, tap **Copy setup prompt** and paste it into Hermes. When installation is ready, compare all three code groups in Hermes and on your iPhone, then tap **Codes match — Connect**. No camera scan or typing is needed. Notification permission is optional; reopening Jr. also checks for readiness.
+
+For an older app or a service without numeric pairing, explicitly choose QR pairing and give Hermes this prompt:
 
 > Install https://github.com/cyberculturedhq/hermes-jr-companion for Hermes Jr. Follow INSTALL.md, enable it across my existing profiles, set up automatic startup, and help me pair my iPhone. Preserve my current setup and don't interrupt running work.
 
-Hermes handles the computer setup and opens a private pairing page in your browser. Scan the code in Jr.; your phone connects and Hermes continues automatically. Then allow notifications on your iPhone.
+For that QR fallback, Hermes handles the computer setup and opens a private pairing page in your browser. Scan the code in Jr.; your phone connects and Hermes continues automatically. Then allow notifications on your iPhone.
 
 For new installations, our service address is **https://hermes-jr-companion.cybercultured.com**. You don't need your own Cloudflare account or Apple signing key.
 
@@ -56,3 +58,9 @@ Hermes Jr. and this companion are independent projects, not affiliated with or e
 See [notification wording](docs/NOTIFICATIONS.md) for the alerts currently sent.
 
 Updates are installed only when you ask. From 0.7.0, the companion verifies a release signature before installing an update. See [update security](UPDATES.md#release-signatures).
+
+## Phone-bound numeric pairing
+
+Numeric pairing requires companion 0.8.0 and the matching iOS app and service updates. Service operators must configure a separate setup signing key and the new temporary-session migration before enabling it. Existing QR pairing remains available.
+
+The [setup protocol](Protocol/SETUP.md) documents its trust boundaries, verification steps, limits, and test coverage. The [service guide](RelayService/README.md#phone-bound-numeric-pairing) covers deployment configuration. This new protocol integration has not had an independent security audit.

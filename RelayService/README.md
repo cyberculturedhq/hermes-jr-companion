@@ -132,3 +132,24 @@ Cloudflare/API references used: [hibernatable WebSockets](https://developers.clo
 Hermes Jr. and this companion are independent projects, not affiliated with or endorsed by [Nous Research](https://github.com/nousresearch) or [Hermes Agent](https://github.com/nousresearch/hermes-agent).
 
 See [Operations](OPERATIONS.md) for global admission limits, private counters, emergency controls and spending limitations.
+
+## Phone-bound numeric pairing
+
+The service now supports short-lived signed setup tickets and a `SetupIntent`
+Durable Object per attempt. Configure the separate `SETUP_TICKET_PRIVATE_KEY`
+secret (base64url Ed25519 PKCS#8 DER) and deploy the `v3-setup` migration before
+shipping the matching app and companion. Generate it privately with
+`Scripts/create-setup-signing-key.py`; do not reuse APNs or release-signing keys.
+Without this secret, numeric setup is unavailable and QR pairing still works.
+
+`POST /v1/pairing/intents` creates the ticket and a separate owner credential.
+`GET /v1/pairing/key` exposes only the issuer's public key. Subsequent setup
+requests carry the public ticket in `X-Hermes-Setup` and the appropriate private
+credential in `Authorization`. Hosts need an admitted installation to claim;
+the broker never authorizes Hermes access itself. Pending claims are bounded to
+three, and selection is atomic. The service budgets 100 new intents/day as well
+as IP and existing service-wide request/push limits. This is a deliberately
+bounded initial rollout; App Attest is not yet implemented.
+
+Read `Protocol/SETUP.md` for the complete construction, API roles, lifecycle,
+limitations, signing-key rotation behavior, and validation.

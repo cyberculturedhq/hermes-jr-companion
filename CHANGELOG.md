@@ -1,3 +1,11 @@
+# 0.8.0
+
+- Add public, phone-bound setup tickets and a resumable numeric-comparison pairing flow.
+- Display the same three-group verification code in Hermes and Jr.; enrollment requires the phone's explicit confirmation.
+- Add bounded temporary setup state, a generic readiness notification, and idempotent enrollment; preserve QR pairing as an explicit fallback.
+- Document the new protocol and validate key substitution, replay, competing claims, expiry, and Swift/Python interoperability.
+
+
 # 0.7.0
 
 - Verify release signatures before checking or installing updates.

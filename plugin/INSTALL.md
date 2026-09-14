@@ -6,21 +6,33 @@ This is a development prototype. Python 3.10+ and a recent Hermes with native pl
 
 > Install https://github.com/cyberculturedhq/hermes-jr-companion for Hermes Jr. Follow INSTALL.md, enable it across my existing profiles, set up automatic startup, and help me pair my iPhone. Preserve my current setup and don't interrupt running work.
 
+## Phone-bound setup (preferred when the prompt contains an HJ1 ticket)
+
+The ticket is public and belongs to the iPhone that generated the prompt. Install the current stable companion with `pair --ticket` support, preserve existing configuration, and verify `hermes jr doctor` and `hermes jr service status` before pairing. Keep the configured service origin; the ticket never authorizes changing it.
+
+Run `hermes jr pair --ticket 'HJ1.…'`, replacing the example with the exact ticket from the user's prompt. Keep this command running. It verifies the signed ticket, signals readiness to the phone, and prints three four-digit groups after the phone joins the exchange. Relay them exactly: “Check that **1234 5678 9012** matches all three groups in Hermes Jr., then tap **It’s correct**.” Use only the actual code returned by the command; never invent a code or confirm on the user's behalf.
+
+The code is a comparison value, not an OTP to type. No QR, browser, fingerprint exchange, or host approval is needed. If the agent tool yields or is interrupted, resume the same command/ticket; it keeps the same keys and code. Do not launch a second setup command. If codes differ or the attempt expires, have the user cancel and generate a new prompt in Jr. Never automatically fall back to QR when ticket validation or code comparison fails.
+
+Wait for the command to report the authenticated phone connection before saying “You're connected. Your conversations are ready in Hermes Jr.” A readiness notification alone does not mean pairing is complete. Push permission is optional; reopening Jr. resumes polling. Keep all private credentials out of chat and logs. The phone must run the app build that supports code comparison and the service must have numeric pairing enabled.
+
+The remaining QR instructions apply only when the user explicitly chooses QR/private-invitation pairing or supplies no setup ticket.
+
 ## Required fresh-install check
 
 Read this guide before starting. A fresh install must install both the native plugin and its Python package from the same current stable release. A manifest saying “0.5.1” does not prove the running Python package was replaced. Confirm the imported `hermes_jr` version and path in the actual Hermes Python environment. Use a fresh command process for pairing so an older loaded module cannot select an obsolete output path.
 
-Normal pairing must produce a browser page and an explicit link. `pair`, `pair --browser`, and `pair --qr` all do this. There is no terminal QR renderer. If your output claims terminal QR art, you are executing old code: correct the package/environment before handing off to the user. `--json` and `--url` are machine-integration options and must not be used for this guided setup.
+For legacy QR pairing without an HJ1 ticket, produce a browser page and an explicit link. `pair`, `pair --browser`, and `pair --qr` all do this. There is no terminal QR renderer. If your output claims terminal QR art, you are executing old code: correct the package/environment before handing off to the user. `--json` and `--url` are machine-integration options and must not be used for this guided setup.
 
 ## Instructions for Hermes
 
-Find the actual Hermes Python environment and profile homes. Use native plugin commands to install and enable each existing profile, install the Python dependencies, and run plugin doctor. Preserve configuration, credentials, existing companion state, and pairings. Decline tool override permission. Arrange any required Hermes restarts after active work finishes. Inspect existing gateway/dashboard supervision, install the companion service, and verify `hermes jr doctor` and `hermes jr service status`. Show the private browser QR and wait for automatic pairing. Never ask the user to exchange fingerprints or approve the phone again. Keep technical verification in your working notes. Follow the user-facing handoff below.
+Find the actual Hermes Python environment and profile homes. Use native plugin commands to install and enable each existing profile, install the Python dependencies, and run plugin doctor. Preserve configuration, credentials, existing companion state, and pairings. Decline tool override permission. Arrange any required Hermes restarts after active work finishes. Inspect existing gateway/dashboard supervision, install the companion service, and verify `hermes jr doctor` and `hermes jr service status`. When the prompt contains an HJ1 ticket, use the phone-bound setup flow above and wait for numeric confirmation on the phone. Only use the private browser QR flow below when no setup ticket was supplied. Never ask the user to exchange fingerprints or approve the phone again. Keep technical verification in your working notes. Follow the user-facing handoff below.
 
 For a new setup, use **https://hermes-jr-companion.cybercultured.com** with the local loopback dashboard and relay/push enabled. For an existing direct/Tailscale setup, enable only the features requested. Keep an existing paired installation's saved service address: the older workers.dev address remains supported and needs no migration.
 
 The service above supports **sandbox APNs only**, for the Hermes Jr. iOS development build. It is a shared development endpoint with no availability guarantee. End users do not need a Cloudflare account or Apple signing key. Self-hosters can deploy the service in [RelayService](https://github.com/cyberculturedhq/hermes-jr-companion/blob/main/RelayService/README.md) and substitute its URL.
 
-## User-facing handoff — instructions for Hermes
+## Legacy QR user-facing handoff (no HJ1 ticket) — instructions for Hermes
 
 You own setup through successful connection. Keep dependencies, process IDs, commands, and verification details in your working notes. Do not call setup complete before the phone connects.
 
