@@ -141,6 +141,7 @@ export class InstallationRelay extends DurableObject<Env> {
         // Retain only the empty SQL schema. A random installation ID is never reused.
         this.ctx.storage.sql.exec("DELETE FROM installation; DELETE FROM devices; DELETE FROM budgets; DELETE FROM push_receipts;");
         for (const socket of this.sockets()) this.close(socket, 4003, "Installation removed");
+        await this.env.ADMISSION.getByName("service").remove(installation.id);
         return json({ status: "deleted" });
       }
       return failure(404, "not_found");
@@ -248,6 +249,7 @@ export class InstallationRelay extends DurableObject<Env> {
   }
 
   webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): void {
+    if (this.env.RELAY_ENABLED !== "true") { this.close(socket, 1013, "Service paused"); return; }
     const state = this.state(socket);
     if (!state?.active) return;
     if (typeof message === "string") { this.rejectSocket(socket, state, 1003, "Binary records required"); return; }
@@ -325,6 +327,13 @@ export class InstallationRelay extends DurableObject<Env> {
     ]);
     this.ctx.storage.sql.exec("INSERT INTO push_receipts (device_id, reference, status, expires_at) VALUES (?, ?, 'pending', ?)", device.id, reference, now + 86400_000);
     if (await this.ctx.storage.getAlarm() === null) await this.ctx.storage.setAlarm(now + 86400_000);
+    if (!await this.env.ADMISSION.getByName("service").push()) {
+      this.ctx.storage.sql.exec("DELETE FROM push_receipts WHERE device_id = ? AND reference = ?", device.id, reference);
+      return failure(429, "push_capacity_reached");
+    }
+    // Authentication may have changed while waiting for the global quota.
+    const currentDevice = this.device(device.id);
+    if (!currentDevice || currentDevice.push_token !== device.push_token || currentDevice.push_env !== device.push_env) return failure(409, "push_registration_changed");
     const result = await sendPush(this.env, device.push_token, device.push_env, reference, encrypted);
     const { status } = result;
     // UPDATE cannot recreate a receipt if the device was revoked while APNs was in flight.

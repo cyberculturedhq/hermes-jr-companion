@@ -1,3 +1,4 @@
+from signing_fixture import PUBLIC, body
 import argparse
 import asyncio
 import fcntl
@@ -101,10 +102,12 @@ class UpdateTests(unittest.IsolatedAsyncioTestCase):
         self.state = State(Path(self.temp.name))
         self.version_patch = patch('hermes_jr.updates.installed_version', return_value='0.2.0')
         self.version_patch.start()
+        key_patch = patch('hermes_jr.release_signature.PUBLIC_KEY', PUBLIC)
+        key_patch.start(); self.addCleanup(key_patch.stop)
         self.addCleanup(self.version_patch.stop)
 
     async def test_new_release_uses_only_fixed_origin_and_commit(self):
-        fetch = AsyncMock(side_effect=[{'tag_name': 'v0.3.0'}, {'object': {'type': 'commit', 'sha': 'a'*40}}])
+        fetch = AsyncMock(side_effect=[{'tag_name': 'v0.3.0', 'body': body()}, {'object': {'type': 'commit', 'sha': 'a'*40}}])
         with patch('hermes_jr.updates.get_json', fetch):
             result = await check(self.state, None)
             again = await check(self.state, None)
@@ -129,7 +132,7 @@ class UpdateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fetch.await_count, 1)
 
     async def test_annotated_release_tag_resolves_commit(self):
-        fetch = AsyncMock(side_effect=[{'tag_name':'v0.3.0'}, {'object':{'type':'tag','sha':'b'*40}}, {'object':{'type':'commit','sha':'a'*40}}])
+        fetch = AsyncMock(side_effect=[{'tag_name':'v0.3.0', 'body': body()}, {'object':{'type':'tag','sha':'b'*40}}, {'object':{'type':'commit','sha':'a'*40}}])
         with patch('hermes_jr.updates.get_json', fetch):
             self.assertEqual((await check(self.state, None))['commit'], 'a'*40)
 

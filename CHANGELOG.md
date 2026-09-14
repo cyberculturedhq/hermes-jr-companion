@@ -1,3 +1,10 @@
+# 0.7.0
+
+- Verify release signatures before checking or installing updates.
+- Reject unknown installations before allocating storage; add service-wide registration, HTTP and push budgets.
+- Add private aggregate monitoring and emergency pause controls.
+- Disable the old Workers development hostname.
+
 # Changelog
 
 ## 0.6.0

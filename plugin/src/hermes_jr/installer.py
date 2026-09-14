@@ -137,6 +137,8 @@ def validate_wheel(wheel, expected_version, installed):
 
 
 def install(state, release):
+    from .release_signature import verify
+    verify(release)
     if release.get('state') != 'available' or not re.fullmatch('[0-9a-f]{40}', release.get('commit', '')):
         raise ValueError('No verified newer stable release is available')
     if version(release['latest']) <= version(installed_version()):

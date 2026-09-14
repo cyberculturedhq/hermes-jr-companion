@@ -4,17 +4,18 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-09-13",
   "compatibility_flags": ["nodejs_compat"],
-  "workers_dev": true,
+  "workers_dev": false,
   "routes": [{ "pattern": "hermes-jr-companion.cybercultured.com", "custom_domain": true }],
   "preview_urls": false,
-  "vars": { "APNS_ENVIRONMENT": "sandbox" },
+  "vars": { "RELAY_ENABLED": "true", "REGISTRATIONS_ENABLED": "true", "APNS_ENVIRONMENT": "sandbox" },
   "durable_objects": {
     "bindings": [
       { "name": "INSTALLATIONS", "class_name": "InstallationRelay" },
+      { "name": "ADMISSION", "class_name": "ServiceAdmission" },
       { "name": "APNS_AUTH", "class_name": "APNsProviderToken" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["InstallationRelay", "APNsProviderToken"] }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["InstallationRelay", "APNsProviderToken"] }, { "tag": "v2-admission", "new_sqlite_classes": ["ServiceAdmission"] }],
   "ratelimits": [
     { "name": "INSTALL_RATE_LIMITER", "namespace_id": "71101", "simple": { "limit": 5, "period": 60 } },
     { "name": "REQUEST_RATE_LIMITER", "namespace_id": "71102", "simple": { "limit": 120, "period": 60 } }

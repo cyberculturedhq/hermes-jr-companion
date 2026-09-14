@@ -1,3 +1,4 @@
+from signing_fixture import PUBLIC, signature
 from email.message import Message
 import json
 from pathlib import Path
@@ -31,7 +32,9 @@ class InstallerTests(unittest.TestCase):
         self.dist=types.SimpleNamespace(metadata=meta)
         self.manager=Mock(platform='darwin',domain='gui/123',label='fixture')
         self.manager.status.return_value={'bridge_running':True,'manager_active':True}
-        self.release={'state':'available','latest':'0.4.0','commit':'a'*40}
+        key_patch=patch('hermes_jr.release_signature.PUBLIC_KEY',PUBLIC)
+        key_patch.start();self.addCleanup(key_patch.stop)
+        self.release={'signature':signature('0.4.0'),'state':'available','latest':'0.4.0','commit':'a'*40}
         self.stage_fail=None
         patches=[patch.object(installer,'Supervisor',return_value=self.manager),
                  patch.object(installer,'installed_profiles',return_value=[(self.home,self.plugin,self.metadata)]),

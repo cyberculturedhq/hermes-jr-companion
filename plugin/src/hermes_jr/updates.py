@@ -8,11 +8,12 @@ import re
 import time
 import aiohttp
 from .service import read_bounded
+from .release_signature import verify, signature_from_body
 
 REPOSITORY = 'cyberculturedhq/hermes-jr-companion'
 API = 'https://api.github.com/repos/' + REPOSITORY
 INTERVAL = 24 * 60 * 60
-VERSION = '0.6.0'
+VERSION = '0.7.0'
 
 
 def version(value):
@@ -68,7 +69,9 @@ async def check(state, client, *, force=False):
                 obj = annotated['object']
             else:
                 raise ValueError('Too many tag indirections')
-            result.update(state='available' if latest > version(result['installed']) else 'current',
+            signature = signature_from_body(release.get('body'))
+            verify({'latest': tag.lstrip('v'), 'commit': sha, 'signature': signature})
+            result.update(signature=signature, state='available' if latest > version(result['installed']) else 'current',
                           latest=tag.lstrip('v'), commit=sha,
                           url='https://github.com/' + REPOSITORY + '/releases/tag/' + tag)
     except (ValueError, TypeError, KeyError, aiohttp.ClientError, TimeoutError):
