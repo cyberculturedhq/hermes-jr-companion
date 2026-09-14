@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "hermes-jr-relay-staging",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "routes": [{ "pattern": "hermes-jr-companion.cybercultured.com", "custom_domain": true }],
+  "preview_urls": false,
+  "vars": { "APNS_ENVIRONMENT": "sandbox" },
+  "durable_objects": {
+    "bindings": [
+      { "name": "INSTALLATIONS", "class_name": "InstallationRelay" },
+      { "name": "APNS_AUTH", "class_name": "APNsProviderToken" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["InstallationRelay", "APNsProviderToken"] }],
+  "ratelimits": [
+    { "name": "INSTALL_RATE_LIMITER", "namespace_id": "71101", "simple": { "limit": 5, "period": 60 } },
+    { "name": "REQUEST_RATE_LIMITER", "namespace_id": "71102", "simple": { "limit": 120, "period": 60 } }
+  ],
+  "observability": { "enabled": false },
+  "limits": { "cpu_ms": 50 }
+}

@@ -1,0 +1,5 @@
+# Optional; empty values disable APNs. Never commit the actual .dev.vars file.
+APNS_TEAM_ID=""
+APNS_KEY_ID=""
+APNS_TOPIC=""
+APNS_PRIVATE_KEY=""

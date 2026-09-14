@@ -1,0 +1,23 @@
+{
+  "name": "hermes-jr-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "types": "wrangler types --strict-vars=false",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "wrangler deploy --dry-run --outdir dist"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.1.8",
+    "@types/node": "22.20.2",
+    "@vitest/runner": "4.1.11",
+    "@vitest/snapshot": "4.1.11",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11",
+    "wrangler": "4.131.1"
+  }
+}
