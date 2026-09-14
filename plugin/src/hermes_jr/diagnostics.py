@@ -8,7 +8,8 @@ from .service import Service, read_bounded
 
 async def check(state, client):
     result = {'checked_at': int(time.time()), 'configured': bool(state.get('host_token')),
-              'service': 'unconfigured', 'dashboard': 'unavailable', 'dashboard_plugin': 'unavailable'}
+              'service': 'unconfigured', 'dashboard': 'unavailable', 'dashboard_plugin': 'unavailable',
+              'dashboard_rpc': 'unavailable'}
     if result['configured']:
         try:
             value = await asyncio.wait_for(Service(state, client).request('GET', '/v1/capabilities'), 10)
@@ -34,6 +35,18 @@ async def check(state, client):
                 result['dashboard_plugin'] = 'not_loaded_or_unauthorized'
     except (aiohttp.ClientError, ValueError, KeyError, TimeoutError):
         pass
+    try:
+        await Gateway(state, client).probe()
+        result['dashboard_rpc'] = 'ok'
+    except aiohttp.WSServerHandshakeError as exc:
+        result['dashboard_rpc'] = 'upgrade_rejected'
+        result['dashboard_rpc_http_status'] = exc.status
+    except aiohttp.ClientConnectorError:
+        result['dashboard_rpc'] = 'not_listening'
+    except TimeoutError:
+        result['dashboard_rpc'] = 'timeout'
+    except (aiohttp.ClientError, ValueError, KeyError, PermissionError, ConnectionError):
+        result['dashboard_rpc'] = 'authentication_or_protocol_failed'
     state.settings({'health': result})
     return result
 

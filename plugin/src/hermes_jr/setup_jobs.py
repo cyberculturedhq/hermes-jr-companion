@@ -7,6 +7,7 @@ import aiohttp
 from . import setup_crypto
 from .setup_pairing import run, SetupExpired
 from .service import ServiceError
+from .gateway import Gateway
 
 TERMINAL = {"connected", "expired", "failed"}
 
@@ -38,7 +39,25 @@ def result(state, job_id):
     value = {"status": status, "message": messages[status]}
     if status == "ready":
         value.update(code=row["code"], expires_at=row["expires"])
+    if status in {"pending", "ready"}:
+        value["watch_command"] = "hermes jr pair --watch " + job_id
     return value
+
+
+async def wait_for_completion(state, job_id):
+    """Read-only bounded waiter for Hermes' background process completion delivery."""
+    if len(job_id) != 64 or any(c not in '0123456789abcdef' for c in job_id):
+        raise ValueError("Invalid pairing job ID")
+    initialize(state)
+    # No ticket, network calls, authorization or second pairing attempt.
+    deadline = time.monotonic() + 1200
+    while True:
+        value = result(state, job_id)
+        if value['status'] not in {'pending', 'ready'}:
+            return value
+        if time.monotonic() >= deadline:
+            return {'status': 'expired', 'message': 'Pairing monitoring timed out; check the existing attempt before retrying.'}
+        await asyncio.sleep(1)
 
 
 def publish(state, job_id, status, *, code=None, expires_at=None):
@@ -60,6 +79,10 @@ async def command(state, service, ticket, name, *, status_only=False, wait_secon
     heartbeat = state.get("setup_worker", {})
     if heartbeat.get("version") != 1 or time.time() - heartbeat.get("at", 0) > 5:
         raise ValueError("Restart the updated companion service with hermes jr service restart before pairing")
+    try:
+        await Gateway(state, service.client).probe()
+    except (aiohttp.ClientError, ValueError, KeyError, OSError, asyncio.TimeoutError) as exc:
+        raise ValueError("Hermes backend is not ready. Run hermes jr doctor and restore supervised loopback backend startup before pairing; no pairing attempt was created.") from None
     issuer = await asyncio.wait_for(service.request("GET", "/v1/pairing/key"), 10)
     intent = setup_crypto.verify_ticket(ticket, issuer["public_key"], state.get("service_url"))
     with state.connect() as db:

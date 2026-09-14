@@ -101,9 +101,9 @@ class Peer:
                 return
             try:
                 await self.local.send(frame)
-            except (ValueError, PermissionError, aiohttp.ClientError, ConnectionError):
+            except (ValueError, PermissionError, aiohttp.ClientError, ConnectionError, TimeoutError):
                 await self.emit({"type": "rpc", "body": {"jsonrpc": "2.0", "id": frame.get("id") if isinstance(frame, dict) else None,
-                                                        "error": {"code": -32000, "message": "Connection to Hermes failed; check the session before retrying"}}})
+                                                        "error": {"code": -32000, "message": "Your iPhone reached the companion, but it couldn’t connect to the local Hermes backend. Restore the Hermes backend, then reconnect."}}})
         elif envelope.get("type") == "http":
             status, body = 500, {"detail": "The local Hermes service is unavailable"}
             try:
@@ -117,6 +117,8 @@ class Peer:
             except (aiohttp.ClientError, TimeoutError):
                 pass
             await self.emit({"type": "http", "id": envelope.get("id"), "status": status, "body": body})
+            if envelope.get("path") == "/api/profiles" and status == 200 and isinstance(body, dict) and isinstance(body.get("profiles"), list):
+                self.bridge.state.set("setup-ready/" + self.device_id, True)
         else:
             raise ValueError("Unknown application envelope")
 

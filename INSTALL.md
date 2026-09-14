@@ -1,3 +1,11 @@
+## Pairing readiness and automatic completion (0.10.0)
+
+Before creating a ticket pairing, the CLI verifies the actual authenticated loopback WebSocket with a bounded RPC probe. `hermes jr doctor` now includes `dashboard_rpc`; a readable page or running bridge alone is insufficient. The Hermes backend must have persistent supervision, not just a process started inside an agent terminal call. Preserve existing supervisors; when absent, configure a user launchd/systemd service for `hermes serve --host 127.0.0.1 --port PORT`. Do not expose a new public listener.
+
+The pending/ready JSON includes `watch_command`. Before displaying the code or ending the turn, run it with the Hermes terminal tool using `background=true, notify_on_complete=true` and verify the returned notification flag is enabled. This read-only waiter tracks the same job without carrying the ticket or authorizing anything. Its exit triggers Hermes's native background-completion notification. If the runtime reports notifications unsupported, supervise that process explicitly; never promise an automatic follow-up that has not been registered. Do not ask the user to report confirmation.
+
+Connected now requires successful Hermes profile discovery through the phone's encrypted connection, in addition to phone authentication. A dead backend must not produce a successful pairing status. The watcher returns failure/expiry rather than reporting success.
+
 # Install and test with Hermes
 
 This is a development prototype. Python 3.10+ and a recent Hermes with native plugin hooks, the `hermes plugins` CLI, and dashboard plugin APIs are required. Installation and configuration are per profile; private companion state is shared under the Hermes root. Automatic startup and crash recovery are provided by `hermes jr service install`. New profiles still need explicit plugin installation/activation; include that step when creating them.
@@ -8,15 +16,15 @@ This is a development prototype. Python 3.10+ and a recent Hermes with native pl
 
 ## Phone-bound setup (when the prompt contains an HJ1 ticket)
 
-Use companion **0.9.0 or newer**. The ticket is public and belongs to the iPhone that generated it. Preserve existing configuration and the configured service origin. Verify `hermes jr doctor` and `hermes jr service status`; restart an older running companion service after updating so it loads the new pairing worker.
+Use companion **0.10.0 or newer**. The ticket is public and belongs to the iPhone that generated it. Preserve existing configuration and the configured service origin. Verify `hermes jr doctor` and `hermes jr service status`; restart an older running companion service after updating so it loads the new pairing worker.
 
-Run `hermes jr pair --ticket 'HJ1.…'` with the exact ticket. This bounded command queues pairing in the companion service and waits up to eight seconds for the code, after a bounded ticket-verification request. It returns JSON and **exits before phone approval**. No background terminal tool or streamed output is required. The installed companion service keeps the pairing alive.
+Run `hermes jr pair --ticket 'HJ1.…'` with the exact ticket. This bounded command queues pairing in the companion service and waits up to eight seconds for the code, after a bounded ticket-verification request. It returns JSON and **exits before phone approval**. No streamed output is needed to obtain the code. Register the separate background completion watcher described above. The installed companion service keeps the pairing alive.
 
 Handle the returned `status`:
 
 - `pending`: the phone has not finished joining the exchange. Wait a few seconds and run `hermes jr pair --ticket 'HJ1.…' --status` with the same ticket. Do not create a duplicate attempt.
-- `ready`: immediately show the returned `code` verbatim in chat: “Check that these three groups match in Hermes Jr., then tap **It’s correct**.” This is a comparison, not an OTP to type. Never invent a code or approve on the user's behalf. Continue checking the short `--status` command while awaiting phone confirmation.
-- `connected`: the companion observed the authenticated phone connection. Only now say pairing completed.
+- `ready`: immediately show the returned `code` verbatim in chat: “Check that these three groups match in Hermes Jr., then tap **It’s correct**.” This is a comparison, not an OTP to type. Never invent a code or approve on the user's behalf. The registered completion watcher reports the outcome; do not ask the user to report confirmation.
+- `connected`: the companion observed authenticated profile discovery from the phone. Only now say pairing completed.
 - `expired` or `failed`: setup did not complete. Ask the user to create a fresh prompt in Jr.; preserve the installed companion. These results exit nonzero.
 - `not_found`: no service-owned job exists for this ticket. Start it with the command without `--status`.
 
@@ -34,9 +42,9 @@ For legacy QR pairing without an HJ1 ticket, produce a browser page and an expli
 
 Find the actual Hermes Python environment and profile homes. Use native plugin commands to install and enable each existing profile, install the Python dependencies, and run plugin doctor. Preserve configuration, credentials, existing companion state, and pairings. Decline tool override permission. Arrange any required Hermes restarts after active work finishes. Inspect existing gateway/dashboard supervision, install the companion service, and verify `hermes jr doctor` and `hermes jr service status`. When the prompt contains an HJ1 ticket, use the phone-bound setup flow above and wait for numeric confirmation on the phone. Only use the private browser QR flow below when no setup ticket was supplied. Never ask the user to exchange fingerprints or approve the phone again. Keep technical verification in your working notes. Follow the user-facing handoff below.
 
-For a new setup, use **https://hermes-jr-companion.cybercultured.com** with the local loopback dashboard and relay/push enabled. For an existing direct/Tailscale setup, enable only the features requested.
+For a new setup, use **https://hermes-jr-companion.cybercultured.com** with the local loopback dashboard and relay/push enabled. For an existing direct/Tailscale setup, enable only the features requested. Keep an existing paired installation's saved service address: the older workers.dev address remains supported and needs no migration.
 
-The service above supports **sandbox APNs only**, for the Hermes Jr. iOS development build. It is a shared development endpoint with no availability guarantee. End users do not need a Cloudflare account or Apple signing key. Self-hosters can deploy the service in [RelayService](RelayService/README.md) and substitute its URL.
+The service above supports **sandbox APNs only**, for the Hermes Jr. iOS development build. It is a shared development endpoint with no availability guarantee. End users do not need a Cloudflare account or Apple signing key. Self-hosters can deploy the service in [RelayService](https://github.com/cyberculturedhq/hermes-jr-companion/blob/main/RelayService/README.md) and substitute its URL.
 
 ## Legacy QR user-facing handoff (no HJ1 ticket) — instructions for Hermes
 
@@ -79,7 +87,7 @@ hermes jr service install
 hermes jr doctor
 ```
 
-The service starts now and after login, recovers from crashes, and shares one bridge across profiles. The computer must stay awake and Hermes’ dashboard must be running. See [STARTUP.md](STARTUP.md) for stop/restart/uninstall commands and Linux login requirements. For a direct/Tailscale connection that only needs notifications, use `--no-relay --push` in setup.
+The service starts now and after login, recovers from crashes, and shares one bridge across profiles. The computer must stay awake and Hermes’ dashboard must be running. See [STARTUP.md](https://github.com/cyberculturedhq/hermes-jr-companion/blob/main/STARTUP.md) for stop/restart/uninstall commands and Linux login requirements. For a direct/Tailscale connection that only needs notifications, use `--no-relay --push` in setup.
 
 For manual setup (Hermes should run these steps when installing for a user):
 
@@ -101,6 +109,6 @@ If chat works but notifications do not, verify the plugin loaded in that convers
 
 ## Updates and removal
 
-Follow [UPDATES.md](UPDATES.md) for automatic checks and explicit, pinned installation across profiles.
+Follow [UPDATES.md](https://github.com/cyberculturedhq/hermes-jr-companion/blob/main/UPDATES.md) for automatic checks and explicit, pinned installation across profiles.
 
 To remove phone access, run `hermes jr revoke DEVICE_UUID`. Local access is removed immediately; the bridge retries remote removal if the service is offline. Run `hermes jr service uninstall` to stop the bridge and remove automatic startup. Disable/remove the plugin in every enabled profile with Hermes’ native plugin commands. Private state intentionally survives plugin replacement; do not delete it before revoking devices or while another profile still uses it.
