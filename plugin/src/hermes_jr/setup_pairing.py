@@ -31,7 +31,11 @@ class SetupBroker:
             return json.loads(raw)
 
 
-async def run(state, service, ticket, name):
+class SetupExpired(ValueError):
+    pass
+
+
+async def run(state, service, ticket, name, report=None):
     if not state.get("relay_enabled") or not state.get("host_private_key"):
         raise ValueError("Configure and start the companion before pairing")
     if not 1 <= len(name) <= 80:
@@ -52,6 +56,9 @@ async def run(state, service, ticket, name):
             raise ValueError("A setup command is already waiting for the phone. Keep that command running.") from None
         saved = state.get(record_key)
         if saved and saved.get("terminal"):
+            if saved.get("status") == "connected":
+                if report: report("connected")
+                return
             raise ValueError("This setup attempt has ended. Create a new prompt in Hermes Jr.")
         host_private = crypto.decode(state.get("host_private_key"), 32)
         if not saved:
@@ -71,7 +78,8 @@ async def run(state, service, ticket, name):
             state.set(record_key, saved)
         await broker.request("POST", "/claims", {**claim, "claim_token": saved["credential"]}, state.get("host_token"))
         suffix, credential = "/claims/" + claim["claim_id"], saved["credential"]
-        print("Hermes is ready. Open Hermes Jr. on your iPhone to compare the codes. Keep this command running.", flush=True)
+        if not report:
+            print("Hermes is ready. Open Hermes Jr. on your iPhone to compare the codes. Keep this command running.", flush=True)
         displayed = False
         deadline = min(intent["expires_at"], saved.get("deadline", intent["expires_at"]))
         while time.time() < deadline:
@@ -79,8 +87,9 @@ async def run(state, service, ticket, name):
                 remote = await broker.request("GET", suffix, credential=credential)
                 if remote["status"] in {"cancelled", "complete"}:
                     if saved.get("device_id") and (state.device(saved["device_id"]) or {}).get("approved"):
-                        state.set(record_key, {"terminal": True, "expires_at": intent["expires_at"]})
-                        print("You’re connected. Your conversations are ready in Hermes Jr.", flush=True)
+                        state.set(record_key, {"terminal": True, "status": "connected", "expires_at": intent["expires_at"]})
+                        if report: report("connected")
+                        else: print("You’re connected. Your conversations are ready in Hermes Jr.", flush=True)
                         return
                     raise ValueError("Setup was cancelled or another installation was selected. Create a new prompt.")
                 remote_key = remote.get("phone_ephemeral")
@@ -97,7 +106,8 @@ async def run(state, service, ticket, name):
                     code = crypto.comparison_code(private, phone, transcript)
                     await broker.request("PUT", suffix + "/reveal", {"host_ephemeral": crypto.encode(public_key(private))}, credential)
                     if not displayed:
-                        print(f"Pairing code: {code}\nCheck all three groups match on your iPhone, then tap ‘Codes match — Connect’. If they differ, cancel.", flush=True)
+                        if report: report("ready", code=code, expires_at=deadline)
+                        else: print(f"Pairing code: {code}\nCheck all three groups match on your iPhone, then tap ‘It’s correct’. If they differ, cancel.", flush=True)
                         displayed = True
                     if remote.get("confirmation"):
                         if not hmac.compare_digest(remote["confirmation"], crypto.confirmation(private, phone, transcript)):
@@ -119,8 +129,9 @@ async def run(state, service, ticket, name):
                             state.set(record_key, saved)
                         await broker.request("PUT", suffix + "/enrollment", {"envelope": saved["envelope"]}, credential)
                         if (state.device(saved["device_id"]) or {}).get("approved"):
-                            state.set(record_key, {"terminal": True, "expires_at": intent["expires_at"]})
-                            print("You’re connected. Your conversations are ready in Hermes Jr.", flush=True)
+                            state.set(record_key, {"terminal": True, "status": "connected", "expires_at": intent["expires_at"]})
+                            if report: report("connected")
+                            else: print("You’re connected. Your conversations are ready in Hermes Jr.", flush=True)
                             return
             except ServiceError as exc:
                 if exc.status not in {429, 500, 502, 503, 504}:
@@ -129,7 +140,7 @@ async def run(state, service, ticket, name):
             except (aiohttp.ClientError, OSError, asyncio.TimeoutError):
                 pass  # Resume the same exchange when transport recovers, under the original deadline.
             await asyncio.sleep(3)
-        raise ValueError("Setup expired. Create a new setup prompt in Hermes Jr.")
+        raise SetupExpired("Setup expired. Create a new setup prompt in Hermes Jr.")
     except (ValueError, ServiceError) as exc:
         if not owns_lock or (isinstance(exc, ServiceError) and exc.status in {429, 500, 502, 503, 504}):
             raise  # Another process or a temporary service failure must not destroy resumable state.

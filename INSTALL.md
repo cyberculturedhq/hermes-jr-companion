@@ -6,17 +6,23 @@ This is a development prototype. Python 3.10+ and a recent Hermes with native pl
 
 > Install https://github.com/cyberculturedhq/hermes-jr-companion for Hermes Jr. Follow INSTALL.md, enable it across my existing profiles, set up automatic startup, and help me pair my iPhone. Preserve my current setup and don't interrupt running work.
 
-## Phone-bound setup (preferred when the prompt contains an HJ1 ticket)
+## Phone-bound setup (when the prompt contains an HJ1 ticket)
 
-The ticket is public and belongs to the iPhone that generated the prompt. Install the current stable companion with `pair --ticket` support, preserve existing configuration, and verify `hermes jr doctor` and `hermes jr service status` before pairing. Keep the configured service origin; the ticket never authorizes changing it.
+Use companion **0.9.0 or newer**. The ticket is public and belongs to the iPhone that generated it. Preserve existing configuration and the configured service origin. Verify `hermes jr doctor` and `hermes jr service status`; restart an older running companion service after updating so it loads the new pairing worker.
 
-Run `hermes jr pair --ticket 'HJ1.…'`, replacing the example with the exact ticket from the user's prompt. Keep this command running. It verifies the signed ticket, signals readiness to the phone, and prints three four-digit groups after the phone joins the exchange. Relay them exactly: “Check that **1234 5678 9012** matches all three groups in Hermes Jr., then tap **It’s correct**.” Use only the actual code returned by the command; never invent a code or confirm on the user's behalf.
+Run `hermes jr pair --ticket 'HJ1.…'` with the exact ticket. This bounded command queues pairing in the companion service and waits up to eight seconds for the code, after a bounded ticket-verification request. It returns JSON and **exits before phone approval**. No background terminal tool or streamed output is required. The installed companion service keeps the pairing alive.
 
-The code is a comparison value, not an OTP to type. No QR, browser, fingerprint exchange, or host approval is needed. If the agent tool yields or is interrupted, resume the same command/ticket; it keeps the same keys and code. Do not launch a second setup command. If codes differ or the attempt expires, have the user cancel and generate a new prompt in Jr. Never automatically fall back to QR when ticket validation or code comparison fails.
+Handle the returned `status`:
 
-Wait for the command to report the authenticated phone connection before saying “You're connected. Your conversations are ready in Hermes Jr.” A readiness notification alone does not mean pairing is complete. Push permission is optional; reopening Jr. resumes polling. Keep all private credentials out of chat and logs. The phone must run the app build that supports code comparison and the service must have numeric pairing enabled.
+- `pending`: the phone has not finished joining the exchange. Wait a few seconds and run `hermes jr pair --ticket 'HJ1.…' --status` with the same ticket. Do not create a duplicate attempt.
+- `ready`: immediately show the returned `code` verbatim in chat: “Check that these three groups match in Hermes Jr., then tap **It’s correct**.” This is a comparison, not an OTP to type. Never invent a code or approve on the user's behalf. Continue checking the short `--status` command while awaiting phone confirmation.
+- `connected`: the companion observed the authenticated phone connection. Only now say pairing completed.
+- `expired` or `failed`: setup did not complete. Ask the user to create a fresh prompt in Jr.; preserve the installed companion. These results exit nonzero.
+- `not_found`: no service-owned job exists for this ticket. Start it with the command without `--status`.
 
-The remaining QR instructions apply only when the user explicitly chooses QR/private-invitation pairing or supplies no setup ticket.
+A terminal command exiting successfully is **not** proof of pairing; inspect the JSON status. The service persists its keys and progress across restarts. Code expiry remains five minutes, capped by the ticket's original twenty-minute lifetime. A push is only a readiness notification. Keep credentials out of chat and logs. Never silently switch an HJ1 attempt to QR pairing.
+
+The remaining QR instructions apply only to legacy integrations without a setup ticket.
 
 ## Required fresh-install check
 

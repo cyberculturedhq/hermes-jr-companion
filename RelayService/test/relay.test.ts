@@ -478,8 +478,17 @@ describe("service admission budgets", () => {
     const response = await worker.fetch(new Request(`https://relay.test/v1/installations/${crypto.randomUUID()}/devices`, {
       headers: { Authorization: `Bearer ${newToken()}` },
     }), { ...env, INSTALLATIONS: new Proxy(env.INSTALLATIONS, { get(target, property) { return property === "getByName" ? getByName : Reflect.get(target, property); } }) });
-    expect(response.status).toBe(429);
+    expect(response.status).toBe(404);
     expect(getByName).not.toHaveBeenCalled();
+  });
+  it("reports service capacity separately from missing installations", async () => {
+    const install = await installation();
+    const admission = env.ADMISSION.getByName("service");
+    await runInDurableObject(admission, (_instance, state) => {
+      state.storage.sql.exec("INSERT OR REPLACE INTO counters VALUES ('requests', ?, 100000)", Math.floor(Date.now() / 86400_000));
+    });
+    expect((await request(base(install) + "/devices", "GET", install.host_token)).status).toBe(503);
+    expect((await request(`/v1/installations/${crypto.randomUUID()}/devices`, "GET", newToken())).status).toBe(404);
   });
   it("enforces daily registration quotas across different IPs and does not refund deletion", async () => {
     const installs = [];

@@ -79,7 +79,9 @@ export default {
       if (!bearer(request)) return failure(401, "unauthorized");
       if (!env.REQUEST_RATE_LIMITER) return failure(503, "rate_limiter_unavailable");
       if (!(await env.REQUEST_RATE_LIMITER.limit({ key: `request:${ip}` })).success) return failure(429, "rate_limited");
-      if (!await env.ADMISSION.getByName("service").admit(match[1])) return failure(429, "installation_unavailable");
+      const admission = await env.ADMISSION.getByName("service").admissionResult(match[1]);
+      if (admission === "unknown") return failure(404, "installation_unavailable");
+      if (admission === "capacity") return failure(503, "service_capacity_reached");
       return env.INSTALLATIONS.getByName(match[1]).fetch(request);
     });
   },

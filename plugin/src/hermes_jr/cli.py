@@ -39,6 +39,7 @@ def configure_parser(parser):
     update.add_argument("--checks", choices=["on", "off"], help="Enable or disable automatic daily release checks")
     pair = commands.add_parser("pair", help="Create a ten-minute pairing invitation")
     pair.add_argument("--name", default="iPhone")
+    pair.add_argument("--status", action="store_true", help="Read the service-owned pairing result for --ticket; never waits for approval")
     pair.add_argument("--no-wait", action="store_true", help="Return after opening the page instead of waiting for the phone")
     output = pair.add_mutually_exclusive_group()
     output.add_argument("--ticket", help="Pair with the iPhone that created this public HJ1 setup ticket; compare the displayed codes")
@@ -134,10 +135,15 @@ async def execute(args):
         elif args.jr_command == "pair":
             if getattr(args, "ticket", None):
                 if args.no_wait:
-                    raise ValueError("Code comparison must wait for the phone; omit --no-wait")
-                from .setup_pairing import run
-                await run(state, service, args.ticket, args.name)
+                    raise ValueError("Ticket pairing already returns before approval; omit --no-wait")
+                from .setup_jobs import command
+                result = await command(state, service, args.ticket, args.name, status_only=args.status)
+                print(json.dumps(result, ensure_ascii=False))
+                if result["status"] in {"expired", "failed", "not_found"}:
+                    raise SystemExit(1)
                 return
+            if args.status:
+                raise ValueError("--status requires --ticket")
             from .secure_channel import public_key
             if not state.get("relay_enabled", False):
                 raise ValueError("Remote access is disabled; enable it with hermes jr setup --relay")

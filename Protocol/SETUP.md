@@ -151,7 +151,7 @@ protocol. See [HPKE.md](HPKE.md) for its remaining limitations.
   phone key submission, capped by the ticket. Both endpoints enforce local
   deadlines; service-side clocks are not the only expiry check.
 - Phone state persists in Keychain; host state persists in the private companion
-  SQLite database. A host process lock prevents parallel setup commands.
+  SQLite database. The companion service owns one active pairing job, protected by the host process lock. CLI calls return bounded JSON results and do not own the session.
   Interrupting a process resumes the same keys/claim; it does not reset limits.
 - Both sides erase temporary keys after success. Cancellation revokes pending
   local enrollment and clears phone state. Host background cleanup removes
@@ -182,14 +182,13 @@ Generate a signing key into a private file with
 Configure its contents as the service's `SETUP_TICKET_PRIVATE_KEY` secret using
 Wrangler; use `.dev.vars` only for local development. Deploy the `v3-setup`
 Durable Object migration alongside the service. The iOS app and updated companion
-must be released together with service support. Until then the app offers the
-explicit QR fallback when the setup endpoint is unavailable.
+must be released together with service support. Companion 0.9.0 owns pairing in the service: `pair --ticket` returns pending or ready before approval, and `pair --ticket ... --status` reads completion. Only `connected` indicates success; expiry and failure exit nonzero. The app onboarding does not offer the legacy QR path.
 
 In the `hermes-ios` development workspace, run the Python tests, relay tests/typecheck, iOS tests with simulator signing
 enabled (Keychain requires entitlements), and
 `Companion/.venv/bin/python Validation/setup_fixture.py`.
 The fixture uses real Swift/Python crypto and the local Worker, compares both
-codes, interrupts/resumes the host, completes HPKE, reads only fixture messages,
+codes after capturing the completed CLI output, restarts the service, completes HPKE, reads only fixture messages,
 and checks cleanup. It uses no production keys or notifications.
 
 Real notification delivery and background/cold-launch behavior still require a
