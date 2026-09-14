@@ -59,3 +59,29 @@ Managed updates support standard, unmodified native installations using the offi
 Checks use stable `vMAJOR.MINOR.PATCH` GitHub releases, not development `main`. GitHub receives the host’s network address and a generic user agent, but no pairing or Hermes credentials. Failed checks do not interrupt the bridge. iPhone notices expire after seven days without a successful fresh check.
 
 Before releasing, run Python and Worker checks, build the package, and exercise update and recovery paths. Actual OS lifecycle changes also require runtime tests. Automated tests do not constitute an independent security audit.
+
+## Release signatures
+
+Starting with 0.7.0, update checks and installation verify an Ed25519 signature
+using a public key pinned in the installed plugin. The signed message binds the
+repository, stable version and exact Git commit. A changed tag, unsigned release,
+wrong signing key or altered version is rejected before the native installer or
+package build executes. Updating remains an explicit user action.
+
+The first installation still trusts the repository you choose. Signatures do not
+make a malicious maintainer safe, and users must keep the pinned verification
+code intact. Releases before 0.7.0 do not gain this protection retroactively.
+
+Maintainers: keep the private release key outside GitHub and the source tree,
+with mode 0600. After the release commit passes CI and merges, run:
+
+```
+python tools/sign_release.py --key /private/path/release-ed25519.pem --version VERSION --commit COMMIT
+```
+
+Include the resulting HTML comment unchanged in the GitHub release body, and
+create its `vVERSION` tag at that exact commit. Tag rules prevent later moves and
+deletion. Keep a secure backup of the private key. Key rotation requires a release
+signed by the currently trusted key that ships the next trusted public key;
+losing that key requires a clearly communicated manual reinstall. A GitHub
+“Verified” badge is separate from this plugin's signature verification.

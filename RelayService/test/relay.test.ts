@@ -471,3 +471,42 @@ describe("generic APNs notifications", () => {
     expect(await runInDurableObject(stub, (_instance, state) => state.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM push_receipts").one().count)).toBe(0);
   });
 });
+
+describe("service admission budgets", () => {
+  it("rejects made-up installation IDs without touching installation storage", async () => {
+    const getByName = vi.fn(() => { throw new Error("must not allocate storage"); });
+    const response = await worker.fetch(new Request(`https://relay.test/v1/installations/${crypto.randomUUID()}/devices`, {
+      headers: { Authorization: `Bearer ${newToken()}` },
+    }), { ...env, INSTALLATIONS: new Proxy(env.INSTALLATIONS, { get(target, property) { return property === "getByName" ? getByName : Reflect.get(target, property); } }) });
+    expect(response.status).toBe(429);
+    expect(getByName).not.toHaveBeenCalled();
+  });
+  it("enforces daily registration quotas across different IPs and does not refund deletion", async () => {
+    const installs = [];
+    for (let i=0;i<25;i++) installs.push(await installation());
+    expect((await request("/v1/installations", "POST", undefined, {})).status).toBe(503);
+    expect((await request(base(installs[0]), "DELETE", installs[0].host_token)).status).toBe(200);
+    expect((await request("/v1/installations", "POST", undefined, {})).status).toBe(503);
+    const status = await env.ADMISSION.getByName("service").status();
+    expect(status.installations).toBe(24);
+    expect(status.lifetime_created).toBe(25);
+  });
+  it("keeps aggregate metrics private and supports emergency pause", async () => {
+    expect((await request("/v1/operator/status")).status).toBe(401);
+    const token = newToken();
+    const response = await worker.fetch(new Request("https://relay.test/v1/operator/status", {headers:{Authorization:`Bearer ${token}`}}), {...env, OPERATOR_TOKEN:token});
+    expect(response.status).toBe(200);
+    expect(JSON.stringify(await response.json())).not.toContain("installation_id");
+    expect((await worker.fetch(new Request("https://relay.test/v1/installations", {method:"POST",body:"{}"}), {...env,RELAY_ENABLED:"false"})).status).toBe(503);
+  });
+  it("enforces push and lifetime budgets across installations and survives eviction", async () => {
+    const stub = env.ADMISSION.getByName("service");
+    await runInDurableObject(stub, (_instance, state) => {
+      state.storage.sql.exec("INSERT INTO totals VALUES ('created',250)");
+      state.storage.sql.exec("INSERT INTO counters VALUES ('pushes',?,3000)", Math.floor(Date.now()/86400_000));
+    });
+    await evictDurableObject(stub);
+    expect(await stub.reserve(crypto.randomUUID())).toBe(false);
+    expect(await stub.push()).toBe(false);
+  });
+});

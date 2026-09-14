@@ -3,3 +3,6 @@ APNS_TEAM_ID=""
 APNS_KEY_ID=""
 APNS_TOPIC=""
 APNS_PRIVATE_KEY=""
+
+# Random 32-byte base64url token; only the operator receives this, never a client.
+OPERATOR_TOKEN=""

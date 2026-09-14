@@ -16,7 +16,7 @@ Normal pairing must produce a browser page and an explicit link. `pair`, `pair -
 
 Find the actual Hermes Python environment and profile homes. Use native plugin commands to install and enable each existing profile, install the Python dependencies, and run plugin doctor. Preserve configuration, credentials, existing companion state, and pairings. Decline tool override permission. Arrange any required Hermes restarts after active work finishes. Inspect existing gateway/dashboard supervision, install the companion service, and verify `hermes jr doctor` and `hermes jr service status`. Show the private browser QR and wait for automatic pairing. Never ask the user to exchange fingerprints or approve the phone again. Keep technical verification in your working notes. Follow the user-facing handoff below.
 
-For a new setup, use **https://hermes-jr-companion.cybercultured.com** with the local loopback dashboard and relay/push enabled. For an existing direct/Tailscale setup, enable only the features requested. Keep an existing paired installation's saved service address: the older workers.dev address remains supported and needs no migration.
+For a new setup, use **https://hermes-jr-companion.cybercultured.com** with the local loopback dashboard and relay/push enabled. For an existing direct/Tailscale setup, enable only the features requested.
 
 The service above supports **sandbox APNs only**, for the Hermes Jr. iOS development build. It is a shared development endpoint with no availability guarantee. End users do not need a Cloudflare account or Apple signing key. Self-hosters can deploy the service in [RelayService](RelayService/README.md) and substitute its URL.
 

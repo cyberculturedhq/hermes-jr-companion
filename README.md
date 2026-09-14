@@ -54,3 +54,5 @@ Start with the [developer guide](docs/TECHNICAL.md) and [self-hosting instructio
 Hermes Jr. and this companion are independent projects, not affiliated with or endorsed by [Nous Research](https://github.com/nousresearch) or [Hermes Agent](https://github.com/nousresearch/hermes-agent).
 
 See [notification wording](docs/NOTIFICATIONS.md) for the alerts currently sent.
+
+Updates are installed only when you ask. From 0.7.0, the companion verifies a release signature before installing an update. See [update security](UPDATES.md#release-signatures).
