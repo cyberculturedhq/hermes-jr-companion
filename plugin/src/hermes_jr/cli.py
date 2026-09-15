@@ -121,7 +121,7 @@ async def execute(args):
                 from .secure_channel import generate_private_key
                 values["host_private_key"] = encoded(generate_private_key())
             state.settings(values)
-            print("Companion configured. Follow INSTALL.md to verify backend startup and run hermes jr service install.")
+            print("Companion configured. Read INSTALL.md in the installed plugin. Run hermes jr backend status; if no listener exists, run hermes jr backend install. Then run hermes jr service install and hermes jr doctor. The messaging gateway is not the dashboard backend.")
         elif args.jr_command == "pair":
             if args.watch:
                 if args.status:

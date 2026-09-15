@@ -1,3 +1,8 @@
+## 0.13.1
+
+- Point missing-backend diagnostics to persistent backend startup, distinguishing it from the messaging gateway.
+- Report a completed explicit update separately from pairing readiness.
+
 ## 0.13.0
 
 - Reuse a healthy installed companion during setup; updates remain explicit.

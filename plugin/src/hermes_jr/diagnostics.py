@@ -6,6 +6,19 @@ from .gateway import Gateway
 from .service import Service, read_bounded
 
 
+def recovery_action(result):
+    if result.get('dashboard_rpc') == 'not_listening':
+        return {'problem': 'The Hermes dashboard backend is not listening. The messaging gateway is a different service.',
+                'action': 'Run hermes jr backend install, then hermes jr doctor. This creates persistent loopback backend startup. Do not start or restart the messaging gateway to fix this.'}
+    if result.get('dashboard_rpc') != 'ok':
+        return {'problem': 'The dashboard connection check failed.',
+                'action': 'Read STARTUP.md from the installed plugin and inspect dashboard authentication or connectivity. Keep the current installation.'}
+    if result.get('service') != 'ok':
+        return {'problem': 'The connection service check failed.',
+                'action': 'Check service availability and the configured service address. Do not reinstall as a network repair.'}
+    return None
+
+
 async def check(state, client):
     result = {'checked_at': int(time.time()), 'configured': bool(state.get('host_token')),
               'service': 'unconfigured', 'dashboard': 'unavailable', 'dashboard_plugin': 'unavailable',
@@ -49,6 +62,8 @@ async def check(state, client):
         result['dashboard_rpc'] = 'authentication_or_protocol_failed'
     from .installation_health import check as installation_check
     result['installation'] = installation_check()
+    action = recovery_action(result)
+    if action: result['recovery'] = action
     state.settings({'health': result})
     return result
 
