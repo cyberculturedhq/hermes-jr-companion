@@ -45,11 +45,11 @@ def native_install(home, commit, log):
 
 def installed_profiles():
     try:
-        from hermes_constants import get_default_hermes_root, named_profile_is_deleted
+        from hermes_constants import get_default_hermes_root, get_hermes_home, named_profile_is_deleted
     except ImportError:
         raise ValueError('Run this command using the Python environment that runs Hermes') from None
     root = get_default_hermes_root().resolve()
-    homes = [root]
+    homes = list(dict.fromkeys([root, Path(get_hermes_home())]))
     if (root / 'profiles').is_dir():
         homes += sorted(p for p in (root / 'profiles').iterdir()
                         if p.is_dir() and re.fullmatch(r'[a-z0-9][a-z0-9_.-]*', p.name)
