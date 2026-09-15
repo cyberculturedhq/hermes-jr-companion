@@ -1,5 +1,9 @@
 ## 0.11.0
 
+- Reduce the iPhone setup prompt to a repository link and ticket; keep the complete workflow in INSTALL.md.
+- Add bounded `backend install/status/uninstall` commands for dedicated loopback launchd/systemd startup.
+- Stop setup when the required release is unavailable instead of downgrading or searching development branches.
+
 - Show the pairing code before a separate bounded foreground waiter, so Hermes resumes automatically after phone confirmation without model-generated notification flags or custom tool availability.
 - Refuse new pairing when native plugin versions differ from the Python package or the running service is outdated.
 - Validate native files and package identity before completing managed updates; roll back inconsistent updates.

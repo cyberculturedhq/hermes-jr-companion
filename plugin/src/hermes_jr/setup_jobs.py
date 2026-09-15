@@ -45,7 +45,7 @@ def result(state, job_id):
         value["completion_watch"] = {
             "name": "terminal",
             "arguments": {"command": shlex.join([sys.executable, "-m", "hermes_jr.cli", "pair", "--watch", job_id]), "timeout": 360},
-            "instruction": "When ready, show the code in your visible assistant message FIRST, then call terminal directly with these arguments in the same turn. Do not add background/notify flags or route terminal through tool_call. This separate foreground waiter exits on completion or expiry; do not end your turn until it returns."}
+            "instruction": "Show the ready code in a visible assistant message, then call terminal with these exact arguments in the same turn. Wait for the result before reporting completion."}
         value["watch_command"] = "hermes jr pair --watch " + job_id
     return value
 

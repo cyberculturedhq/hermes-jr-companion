@@ -32,6 +32,8 @@ def configure_parser(parser):
     setup.add_argument("--allow-local-service", action="store_true", help="Allow loopback HTTP for development")
     managed = commands.add_parser("service", help="Manage automatic startup and crash recovery")
     managed.add_argument("service_action", choices=["install", "start", "stop", "restart", "status", "uninstall"])
+    backend = commands.add_parser("backend", help="Manage a dedicated loopback Hermes backend when no existing supervisor provides one")
+    backend.add_argument("backend_action", choices=["install", "status", "uninstall"])
     commands.add_parser("doctor", help="Check service and dashboard connectivity without exposing secrets")
     update = commands.add_parser("update", help="Check stable releases and show the explicit update procedure")
     update.add_argument("--install", action="store_true", help="Explicitly install the latest compatible stable release with rollback; use when Hermes work is idle")
@@ -42,7 +44,7 @@ def configure_parser(parser):
     pair.add_argument("--status", action="store_true", help="Read the service-owned pairing result for --ticket; never waits for approval")
     pair.add_argument("--no-wait", action="store_true", help="Return after opening the page instead of waiting for the phone")
     output = pair.add_mutually_exclusive_group()
-    output.add_argument("--watch", metavar="JOB_ID", help="Wait for an existing ticket pairing to finish; run as a Hermes background task with completion notifications")
+    output.add_argument("--watch", metavar="JOB_ID", help="Wait for pairing completion after showing the comparison code to the user")
     output.add_argument("--ticket", help="Pair with the iPhone that created this public HJ1 setup ticket; compare the displayed codes")
     output.add_argument("--browser", action="store_true", help="Open a private branded QR page (default)")
     output.add_argument("--json", action="store_true", help="Output invitation JSON for automation")
@@ -77,6 +79,13 @@ def print_pairing(payload, *, as_url=False, out=None, err=None):
 
 async def execute(args):
     state = State()
+    if args.jr_command == "backend":
+        from .backend import BackendSupervisor
+        manager = BackendSupervisor(state)
+        if args.backend_action != "status":
+            await asyncio.to_thread(getattr(manager, args.backend_action))
+        print(json.dumps(manager.status(), indent=2))
+        return
     if args.jr_command == "rollback":
         from .installer import rollback
         await asyncio.to_thread(rollback, state)
@@ -132,7 +141,7 @@ async def execute(args):
                 from .secure_channel import generate_private_key
                 values["host_private_key"] = encoded(generate_private_key())
             state.settings(values)
-            print("Companion configured. Enable the Hermes plugin and restart Hermes, then run: hermes jr service install")
+            print("Companion configured. Follow INSTALL.md to verify backend startup and run hermes jr service install.")
         elif args.jr_command == "pair":
             if args.watch:
                 if args.status or args.no_wait:
