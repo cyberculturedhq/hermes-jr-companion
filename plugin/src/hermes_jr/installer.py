@@ -197,8 +197,11 @@ def install(state, release):
                 for home, _, _ in profiles:
                     native_install(home, release['commit'], log)
                 run([sys.executable, '-m', 'pip', 'install', '--no-deps', '--force-reinstall', str(wheels[0])], log=log)
-                run([sys.executable, '-I', '-c', 'from hermes_jr import cli, daemon; import argparse; cli.configure_parser(argparse.ArgumentParser())'], log=log)
-                for home, plugin, _ in profiles:
+                run([sys.executable, '-I', '-c', 'from hermes_jr import cli, daemon; from hermes_jr.updates import installed_version; import argparse; assert installed_version() == ' + repr(release['latest']) + '; cli.configure_parser(argparse.ArgumentParser())'], log=log)
+                from .installation_health import manifest_version
+                for home, plugin, metadata in profiles:
+                    if manifest_version(plugin / 'plugin.yaml') != release['latest'] or json.loads(metadata.read_text()).get('hermes-jr', {}).get('revision') != release['commit']:
+                        raise ValueError('Updated native plugin does not match the verified package release')
                     run([sys.executable, '-m', 'hermes_cli.main', 'plugins', 'doctor', str(plugin), '--ci'], home=home, log=log)
             if snapshot.journal['restart']:
                 manager.start()

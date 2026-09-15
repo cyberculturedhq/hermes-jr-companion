@@ -1,2 +1,2 @@
 """Hermes Jr. companion. No import-time network or persistent-state mutations."""
-__version__ = "0.10.0"
+__version__ = "0.11.0"

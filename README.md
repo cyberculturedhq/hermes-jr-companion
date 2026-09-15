@@ -21,13 +21,9 @@ Read [how notification encryption works](Protocol/NOTIFICATIONS.md) and the [rel
 
 ## Set it up with Hermes
 
-In the updated Jr. app, tap **Copy setup prompt** and paste it into Hermes. When installation is ready, compare all three code groups in Hermes and on your iPhone, then tap **Codes match — Connect**. No camera scan or typing is needed. Notification permission is optional; reopening Jr. also checks for readiness.
+In Jr., tap **Copy setup prompt** and paste it into Hermes. Hermes follows [INSTALL.md](INSTALL.md) to install the plugin and connect your phone. Compare the three code groups shown by Hermes and Jr., then tap **It’s correct**.
 
-For an older app or a service without numeric pairing, explicitly choose QR pairing and give Hermes this prompt:
-
-> Install https://github.com/cyberculturedhq/hermes-jr-companion for Hermes Jr. Follow INSTALL.md, enable it across my existing profiles, set up automatic startup, and help me pair my iPhone. Preserve my current setup and don't interrupt running work.
-
-For that QR fallback, Hermes handles the computer setup and opens a private pairing page in your browser. Scan the code in Jr.; your phone connects and Hermes continues automatically. Then allow notifications on your iPhone.
+Notification permission is optional; reopening Jr. also checks for readiness.
 
 For new installations, our service address is **https://hermes-jr-companion.cybercultured.com**. You don't need your own Cloudflare account or Apple signing key.
 
@@ -61,6 +57,6 @@ Updates are installed only when you ask. From 0.7.0, the companion verifies a re
 
 ## Phone-bound numeric pairing
 
-Numeric pairing requires companion 0.9.0 and the matching iOS app and service updates. Service operators must configure a separate setup signing key and the new temporary-session migration before enabling it. Existing QR pairing remains available.
+The current setup flow requires companion 0.11.0 and the matching iOS app and service updates. Service operators must configure a separate setup signing key and the new temporary-session migration before enabling it. Existing QR pairing remains available.
 
 The [setup protocol](Protocol/SETUP.md) documents its trust boundaries, verification steps, limits, and test coverage. The [service guide](RelayService/README.md#phone-bound-numeric-pairing) covers deployment configuration. This new protocol integration has not had an independent security audit.

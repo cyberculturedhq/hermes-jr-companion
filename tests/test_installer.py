@@ -48,8 +48,8 @@ class InstallerTests(unittest.TestCase):
 
     def native(self, home, commit, log):
         if home==self.home:
-            (self.plugin/'plugin.yaml').write_text('new plugin')
-            self.metadata.write_text('new metadata')
+            (self.plugin/'plugin.yaml').write_text('name: hermes-jr\nversion: 0.4.0\n')
+            self.metadata.write_text(json.dumps({'hermes-jr': {'revision': commit}}))
         else:
             candidate=home/'plugins/hermes-jr';candidate.mkdir(parents=True)
             (candidate/'COMPATIBILITY.json').write_text(json.dumps(installer.POLICY))
@@ -99,6 +99,17 @@ class InstallerTests(unittest.TestCase):
         self.stage_fail='doctor'
         with self.assertRaisesRegex(ValueError,'previous companion was restored'):
             installer.install(self.state,self.release)
+        self.assert_old()
+
+    def test_native_version_mismatch_rolls_back_package_and_profiles(self):
+        native = self.native
+        def wrong_version(home, commit, log):
+            native(home, commit, log)
+            if home == self.home:
+                (self.plugin/'plugin.yaml').write_text('version: 0.3.0\n')
+        with patch.object(installer, 'native_install', side_effect=wrong_version):
+            with self.assertRaisesRegex(ValueError, 'previous companion was restored'):
+                installer.install(self.state, self.release)
         self.assert_old()
 
     def test_startup_failure_restores_and_restarts_previous_service(self):

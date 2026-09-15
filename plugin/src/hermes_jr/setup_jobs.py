@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import time
+import shlex
+import sys
 import aiohttp
-from . import setup_crypto
+from . import setup_crypto, __version__
 from .setup_pairing import run, SetupExpired
 from .service import ServiceError
 from .gateway import Gateway
@@ -40,12 +42,16 @@ def result(state, job_id):
     if status == "ready":
         value.update(code=row["code"], expires_at=row["expires"])
     if status in {"pending", "ready"}:
+        value["completion_watch"] = {
+            "name": "terminal",
+            "arguments": {"command": shlex.join([sys.executable, "-m", "hermes_jr.cli", "pair", "--watch", job_id]), "timeout": 360},
+            "instruction": "Show the ready code in a visible assistant message, then call terminal with these exact arguments in the same turn. Wait for the result before reporting completion."}
         value["watch_command"] = "hermes jr pair --watch " + job_id
     return value
 
 
 async def wait_for_completion(state, job_id):
-    """Read-only bounded waiter for Hermes' background process completion delivery."""
+    """Read-only bounded waiter; the installing agent shows the code before invoking it."""
     if len(job_id) != 64 or any(c not in '0123456789abcdef' for c in job_id):
         raise ValueError("Invalid pairing job ID")
     initialize(state)
@@ -72,12 +78,14 @@ async def command(state, service, ticket, name, *, status_only=False, wait_secon
     existing = result(state, job_id)
     if status_only or existing["status"] != "not_found":
         return existing
+    from .installation_health import require_consistent
+    require_consistent()
     if not 1 <= len(name) <= 80:
         raise ValueError("Invalid phone name")
     if not state.get("relay_enabled") or not state.get("host_private_key"):
         raise ValueError("Configure the companion before pairing")
     heartbeat = state.get("setup_worker", {})
-    if heartbeat.get("version") != 1 or time.time() - heartbeat.get("at", 0) > 5:
+    if heartbeat.get("version") != 1 or heartbeat.get("package_version") != __version__ or time.time() - heartbeat.get("at", 0) > 5:
         raise ValueError("Restart the updated companion service with hermes jr service restart before pairing")
     try:
         await Gateway(state, service.client).probe()
@@ -124,7 +132,7 @@ async def watch(state, service):
     task = None
     try:
         while True:
-            state.set("setup_worker", {"version": 1, "at": time.time()})
+            state.set("setup_worker", {"version": 1, "package_version": __version__, "at": time.time()})
             if task and task.done():
                 # Observe failures without taking down the relay; never expose credentials in logs.
                 try: task.result()

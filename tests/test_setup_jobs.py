@@ -14,7 +14,7 @@ class SetupJobTests(unittest.IsolatedAsyncioTestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.state = State(Path(self.temp.name))
         self.state.settings({'relay_enabled': True, 'host_private_key': 'fixture', 'service_url': 'https://relay.test',
-                             'setup_worker': {'version': 1, 'at': time.time()}})
+                             'setup_worker': {'version': 1, 'package_version': jobs.__version__, 'at': time.time()}})
         jobs.initialize(self.state)
         self.service = AsyncMock()
         self.service.request.return_value = {'public_key': 'fixture'}
@@ -46,6 +46,15 @@ class SetupJobTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(self.ticket,json.dumps(value))
         self.assertNotEqual(value['status'],'connected')
 
+    async def test_completion_descriptor_needs_only_command_and_timeout(self):
+        await jobs.command(self.state, self.service, self.ticket, 'iPhone', wait_seconds=0)
+        value = jobs.result(self.state, jobs.identity(self.ticket))['completion_watch']
+        self.assertEqual(value['name'], 'terminal')
+        self.assertEqual(set(value['arguments']), {'command', 'timeout'})
+        self.assertEqual(value['arguments']['timeout'], 360)
+        self.assertIn('-m hermes_jr.cli pair --watch ' + jobs.identity(self.ticket), value['arguments']['command'])
+        self.assertNotIn(self.ticket, json.dumps(value))
+
     async def test_expiry_never_reports_completion_and_hides_old_code(self):
         await jobs.command(self.state,self.service,self.ticket,'iPhone',wait_seconds=0)
         jobs.publish(self.state,jobs.identity(self.ticket),'ready',code='1234 5678 9012',expires_at=time.time()-1)
@@ -74,6 +83,13 @@ class SetupJobTests(unittest.IsolatedAsyncioTestCase):
         self.state.set('setup_worker',{'version':1,'at':time.time()-30})
         with self.assertRaisesRegex(ValueError,'Restart'):
             await jobs.command(self.state,self.service,self.ticket,'iPhone',wait_seconds=0)
+        self.service.request.assert_not_awaited()
+
+    async def test_live_worker_running_old_package_cannot_create_pairing(self):
+        self.state.set('setup_worker', {'version': 1, 'package_version': '0.10.0', 'at': time.time()})
+        with self.assertRaisesRegex(ValueError, 'Restart'):
+            await jobs.command(self.state, self.service, self.ticket, 'iPhone', wait_seconds=0)
+        self.assertEqual(jobs.result(self.state, jobs.identity(self.ticket))['status'], 'not_found')
         self.service.request.assert_not_awaited()
 
     async def test_unavailable_backend_cannot_create_pairing(self):

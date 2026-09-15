@@ -47,6 +47,8 @@ async def check(state, client):
         result['dashboard_rpc'] = 'timeout'
     except (aiohttp.ClientError, ValueError, KeyError, PermissionError, ConnectionError):
         result['dashboard_rpc'] = 'authentication_or_protocol_failed'
+    from .installation_health import check as installation_check
+    result['installation'] = installation_check()
     state.settings({'health': result})
     return result
 
