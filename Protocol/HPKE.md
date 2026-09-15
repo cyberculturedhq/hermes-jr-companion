@@ -21,16 +21,15 @@ plaintext lengths. TLS is still required between each endpoint and the relay.
 ## Caller contract
 
 The phone must authenticate the host's 32-byte X25519 public key through the
-private pairing QR or the explicit numeric comparison in [SETUP.md](SETUP.md).
+explicit numeric comparison in [SETUP.md](SETUP.md).
 Do not replace an established pinned key based on relay responses.
 Store the phone's private key using the iOS Keychain. The host persists its
 private key and authorized-device registry locally with restrictive permissions.
 The crypto module does not implement secret storage or pairing-secret storage.
 
-Pairing invitations must be random, single use, and expire. A private QR scan
-can authorize automatic pairing; machine-readable/manual invitations retain the
-manual approval path. Numeric setup requires the phone’s explicit code comparison
-and binds the invitation to its expected public key. The first encrypted authentication payload is caller-owned JSON,
+Enrollment secrets are random, single use, and expire. Numeric setup requires
+explicit code comparison and binds enrollment to the phone’s expected public key.
+The first encrypted authentication payload is caller-owned JSON,
 for example `{"pairing_secret":"...","device_name":"...","device_id":"..."}`.
 A registered device can omit the pairing secret. IDs and names do not authorize
 anything: the caller binds them to the cryptographically authenticated phone key.
@@ -92,7 +91,7 @@ The suite/version is fixed; unknown versions are rejected, not negotiated down.
 2. Host generates a fresh cryptographically random host nonce, constructs the
    transcript below, creates the host-to-phone HPKE Auth sender, and sends:
    `0x02 || host_nonce || host_enc || host_proof_record`.
-3. Phone decrypts and checks the host proof using the QR-pinned public key.
+3. Phone decrypts and checks the host proof using the public key verified by numeric comparison.
    Only after this check, it creates its phone-to-host HPKE Auth sender and sends:
    `0x03 || phone_enc || authentication_record`.
 4. Host decrypts the authentication record using the phone public key from the
@@ -183,6 +182,6 @@ APIs: [Apple HPKE.Sender](https://developer.apple.com/documentation/cryptokit/hp
 [Apple HPKE.Recipient](https://developer.apple.com/documentation/cryptokit/hpke/recipient),
 [PyHPKE](https://pyhpke.readthedocs.io/en/latest/api.html).
 
-## Automatic pairing (companion 0.6+)
+## Enrollment after numeric comparison
 
-Creating a new QR authorizes its first authenticated claimant. The random pairing secret is checked inside the authenticated HPKE channel and atomically consumed while pinning that phone’s public key and approving it. The QR pins the host key on the phone. Routing tokens alone cannot authorize; expired/revoked invitations and subsequent different phone keys are rejected. There is no human fingerprint exchange for this flow. Anyone who obtains an unused QR can claim it, so it must remain private. Older invitations without explicit automatic-pairing intent retain manual approval.
+After the phone confirms the matching numbers, the host encrypts enrollment to the phone key bound in its signed ticket. The HPKE connection must prove possession of that same key and the single-use enrollment secret. Routing tokens alone cannot authorize. Expired/revoked enrollment and different phone keys are rejected. Already-approved phones reconnect using their pinned keys.

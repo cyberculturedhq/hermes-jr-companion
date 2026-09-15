@@ -8,7 +8,7 @@ Connect to your Hermes agent from your phone and get notified when a conversatio
 
 Your Hermes computer and paired iPhone handle the private content. Our relay delivers encrypted data.
 
-- **Encrypted conversations:** remote access uses end-to-end encryption with a host identity verified by matching codes on both devices or by scanning a private QR. A relay credential alone cannot unlock your agent.
+- **Encrypted conversations:** remote access uses end-to-end encryption with a host identity verified by matching codes on both devices. A relay credential alone cannot unlock your agent.
 - **Encrypted notification details:** profile names, conversation titles, and event types are encrypted on your Hermes computer and decrypted on your iPhone. Our relay and Apple’s push servers receive ciphertext and a generic fallback, not those details. Notification payloads are padded to a fixed size.
 - **Keys stay with your devices:** notification keys are stored in the iPhone’s Keychain and the companion’s private local state, never sent to our relay. Phones receive separate keys.
 - **Code you can inspect:** the companion and relay are open source. You can review them, fork them, or host the service yourself. The iOS source will also be published.
@@ -57,6 +57,6 @@ Updates are installed only when you ask. From 0.7.0, the companion verifies a re
 
 ## Phone-bound numeric pairing
 
-The current setup flow requires companion 0.11.0 and the matching iOS app and service updates. Service operators must configure a separate setup signing key and the new temporary-session migration before enabling it. Existing QR pairing remains available.
+The current setup flow requires companion 0.12.0 and the matching iOS app and service updates. Service operators must configure a separate setup signing key and the new temporary-session migration before enabling it.
 
 The [setup protocol](Protocol/SETUP.md) documents its trust boundaries, verification steps, limits, and test coverage. The [service guide](RelayService/README.md#phone-bound-numeric-pairing) covers deployment configuration. This new protocol integration has not had an independent security audit.

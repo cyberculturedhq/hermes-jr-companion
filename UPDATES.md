@@ -41,18 +41,11 @@ Rollback refuses to overwrite subsequent local code changes. Backups and private
 
 Then restart loaded Hermes processes when idle and run `hermes jr doctor`. Keep backups until you are satisfied with the update. Never delete private state to repair installed code.
 
-## First upgrade from 0.2 or a development checkout
+## Repair an installation or update changed dependencies
 
-Older versions do not have the managed installer. The installable plugin now lives in the repository’s `plugin/` directory, separate from server code and tests. For this first upgrade, record your current version/revision, preserve any local edits, and stop the bridge. In each installed profile, use the native installer with the new subdirectory source and the commit of the desired stable release:
+If the managed updater reports an unsupported layout or dependency change, run the checked installer in [INSTALL.md](INSTALL.md). It backs up the existing plugin/package before replacement and preserves the installed versions of shared dependencies. Incompatible dependencies stop installation instead of upgrading Hermes’s environment. It enables the companion across existing profiles, so use the managed updater when you want previously disabled profiles to remain disabled.
 
-```sh
-hermes jr service stop
-hermes plugins install 'https://github.com/cyberculturedhq/hermes-jr-companion.git#plugin' --ref COMMIT_SHA --force --no-enable
-/path/to/hermes/python -m pip install /path/to/profile-home/plugins/hermes-jr
-hermes plugins doctor /path/to/profile-home/plugins/hermes-jr --ci
-```
-
-Use `hermes --profile PROFILE plugins ...` for named profiles. Install the Python package once per distinct Hermes environment. Preserve existing activation settings; do not enable previously disabled profiles. Restart loaded Hermes processes when idle, start the bridge, and run doctor. This first manual migration has no automatic rollback backup; keep your previous files until validation succeeds.
+Version 0.12 removes the unused QR dependency and therefore uses this installer when upgrading from 0.11. Existing pairings remain valid.
 
 ## Limits and release policy
 

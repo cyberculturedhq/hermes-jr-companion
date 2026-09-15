@@ -1,8 +1,12 @@
-## 0.11.0
+# 0.12.0
 
-- Reduce the iPhone setup prompt to a repository link and ticket; keep the complete workflow in INSTALL.md.
-- Add bounded `backend install/status/uninstall` commands for dedicated loopback launchd/systemd startup.
-- Stop setup when the required release is unavailable instead of downgrading or searching development branches.
+- Numeric comparison is the only new pairing path. Remove browser/scanner pairing, manual fingerprint commands, and the QR dependency.
+- Add a signed-release installer that uses native Hermes installation across profiles, preserves dependency versions, backs up replaced code, and checks services.
+- Consolidate setup instructions around the installer and the existing bounded pairing/watch commands.
+
+Earlier entries below describe historical releases, not current setup instructions.
+
+## 0.11.0
 
 - Show the pairing code before a separate bounded foreground waiter, so Hermes resumes automatically after phone confirmation without model-generated notification flags or custom tool availability.
 - Refuse new pairing when native plugin versions differ from the Python package or the running service is outdated.
