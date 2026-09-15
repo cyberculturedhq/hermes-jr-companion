@@ -1,10 +1,10 @@
-# Connect Hermes Jr.
+# Connect an iPhone
 
-When the user gives you a setup ticket, follow these two steps. Keep the ticket exact. Use terminal for these commands.
+This is the current setup guide. When the user supplies a setup ticket, follow it from terminal. Use the current repository files, not a cached web summary. If web extraction shows a different procedure, fetch this file directly from GitHub in terminal.
 
-## 1. Install and check the companion
+## 1. Prepare Hermes
 
-Run the installer once. It finds Hermes’s Python, verifies the latest stable release, installs the matching plugin and package across existing profiles, and checks startup and connectivity.
+Run these commands together in one terminal call with timeout 300:
 
 ```sh
 jr_setup_dir=$(mktemp -d)
@@ -12,32 +12,20 @@ curl -fsSL https://raw.githubusercontent.com/cyberculturedhq/hermes-jr-companion
 python3 "$jr_setup_dir/install.py"
 ```
 
-Use a terminal timeout of 300 seconds. If your terminal returns a running process, follow that same process until it exits. Do not start another installer. The script prints a private log path and returns `status: ready` with the Hermes Python executable when checks pass.
+The script installs when missing and checks an existing installation without updating, re-enabling profiles, or restarting it. Follow the same process until it exits. `ready` returns the Hermes Python path. If a check fails, follow [STARTUP.md](STARTUP.md) to fix that specific problem; do not reinstall or upgrade as a generic repair. Updates require the user's explicit request and [UPDATES.md](UPDATES.md).
 
-If it stops, report the specific error. Inspect the private log when necessary, keeping credentials out of chat. Do not substitute a raw Git checkout, downgrade, delete configuration, or restart unrelated Hermes sessions. An existing backend listener is preserved; if the installer reports an external backend, verify its supervisor using [STARTUP.md](STARTUP.md). A temporary terminal server is not persistent startup.
+If the backend is externally managed, verify its persistent supervisor and current `doctor` checks before continuing. A listening port alone does not prove it will survive a terminal closing. Preserve existing services and profile choices.
 
 ## 2. Pair
 
-Using the `python` path returned by the installer:
+Run `PYTHON -m hermes_jr.cli pair --ticket 'TICKET'`, using the returned Python path and exact ticket.
 
-```sh
-PYTHON -m hermes_jr.cli pair --ticket 'TICKET'
-```
+- `pending`: wait a few seconds and repeat with `--status`.
+- `ready`: say “Check that **CODE** matches all three groups in Jr., then tap **It’s correct**.” Immediately call terminal with the returned `completion_watch.arguments` in the same turn. Wait for its result.
+- `connected`: say **“Your iPhone is connected.”**
+- `failed` or `expired`: explain the returned reason and recovery action. A new prompt does not repair a backend or internal error. Keep the installed companion.
+- `not_found`: run the ticket command without `--status`.
 
-Replace `PYTHON` and `TICKET` with the actual values. Read the JSON result:
+Keep the user handoff short and nontechnical: code, phone action, then connection confirmation. Do not repeat Python paths, commands, package versions, process details, or JSON. The user confirms on the phone; never ask them to confirm back in chat. Only `connected` means success.
 
-| Status | Action |
-| --- | --- |
-| `pending` | Wait a few seconds, then repeat with `--status`. |
-| `ready` | Say: “Check that **CODE** matches all three groups in Jr., then tap **It’s correct**.” In the same turn, call terminal with the exact returned `completion_watch.arguments`. Wait for its result. |
-| `connected` | Say: “Your iPhone is connected.” |
-| `expired` or `failed` | Explain that setup did not finish and request a fresh prompt from Jr. Keep the installation. |
-| `not_found` | Start this ticket without `--status`. |
-
-Show the code before starting the watcher. Only `connected` confirms success. The user confirms on their iPhone; do not ask them to type a confirmation back into Hermes.
-
-Tickets last twenty minutes; code comparison lasts up to five minutes. If installation outlasts the ticket, keep the installation and use a fresh prompt.
-
-Notifications are optional in Jr. Verify delivery from a real task while the app is backgrounded before claiming they work. Loaded Hermes sessions pick up new plugin hooks after they finish and restart.
-
-[Startup](STARTUP.md) · [Updates and removal](UPDATES.md)
+Tickets last twenty minutes; code comparison lasts up to five. If one expires, obtain a new prompt and reuse the installation. Notifications are optional; do not claim delivery works without a real backgrounded-phone test. Newly installed hooks load when existing Hermes sessions finish and restart.

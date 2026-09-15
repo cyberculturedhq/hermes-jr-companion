@@ -135,3 +135,15 @@ class InstallerTests(unittest.TestCase):
         (self.package/'code.py').write_text('partially replaced')
         installer.rollback(self.state)
         self.assert_old()
+
+    def test_live_connection_failure_rolls_back_after_service_start(self):
+        with patch.object(installer, 'verify_connection', side_effect=ValueError('health failed')):
+            with self.assertRaisesRegex(ValueError, 'previous companion was restored'):
+                installer.install(self.state, self.release)
+        self.assert_old()
+
+    def test_removed_dependency_can_update_without_uninstalling_shared_packages(self):
+        self.dist.metadata['Requires-Dist'] = 'qrcode==8.2'
+        installer.install(self.state, self.release)
+        installer.rollback(self.state)
+        self.assert_old()

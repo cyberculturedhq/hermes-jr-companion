@@ -115,3 +115,25 @@ class SetupJobTests(unittest.IsolatedAsyncioTestCase):
         await jobs.command(self.state,self.service,self.ticket,'iPhone',wait_seconds=0)
         jobs.publish(self.state,jobs.identity(self.ticket),'ready',code='1234 5678 9012',expires_at=time.time()-1)
         self.assertEqual((await jobs.wait_for_completion(self.state,jobs.identity(self.ticket)))['status'],'expired')
+
+    async def test_failures_survive_reload_with_specific_sanitized_actions(self):
+        from hermes_jr.setup_failures import SetupFailure
+        from hermes_jr.service import ServiceError
+        await jobs.command(self.state, self.service, self.ticket, 'iPhone', wait_seconds=0)
+        identity = jobs.identity(self.ticket)
+        for error, reason in [(SetupFailure('cancelled'), 'cancelled'), (SetupFailure('verification'), 'verification'),
+                              (ServiceError(403), 'rejected'), (ServiceError(404), 'unavailable'),
+                              (RuntimeError('secret-do-not-print'), 'internal')]:
+            with patch.object(jobs, 'run', side_effect=error):
+                await jobs.perform(self.state, self.service, {'id': identity, 'ticket': self.ticket, 'name': 'iPhone'})
+            value = jobs.result(State(self.state.directory), identity)
+            self.assertEqual(value['reason'], reason)
+            self.assertTrue(value['recovery'])
+            self.assertNotIn('secret-do-not-print', json.dumps(value))
+            self.assertNotIn('code', value)
+
+    async def test_failure_storage_keeps_old_job_table_compatible_with_rollback(self):
+        with self.state.connect() as db:
+            db.execute("INSERT INTO setup_jobs VALUES ('old','ticket','phone','pending',NULL,?,?)", (time.time()+60,time.time()))
+        jobs.publish(self.state, 'old', 'failed', reason='internal')
+        self.assertEqual(jobs.result(self.state, 'old')['reason'], 'internal')

@@ -10,6 +10,7 @@ from . import setup_crypto, __version__
 from .setup_pairing import run, SetupExpired
 from .service import ServiceError
 from .gateway import Gateway
+from .setup_failures import SetupFailure, details
 
 TERMINAL = {"connected", "expired", "failed"}
 
@@ -39,6 +40,11 @@ def result(state, job_id):
         "failed": "Pairing could not be completed. Create a fresh setup prompt in Jr.; do not report success.",
     }
     value = {"status": status, "message": messages[status]}
+    if status in {'expired', 'failed'}:
+        value.update(details('expired' if status == 'expired' else state.get('setup-failure/' + job_id)))
+    if status == 'connected':
+        value['user_message'] = 'Your iPhone is connected.'
+        value['instruction'] = 'Say only the user_message; omit commands, versions, paths and JSON.'
     if status == "ready":
         value.update(code=row["code"], expires_at=row["expires"])
     if status in {"pending", "ready"}:
@@ -66,7 +72,9 @@ async def wait_for_completion(state, job_id):
         await asyncio.sleep(1)
 
 
-def publish(state, job_id, status, *, code=None, expires_at=None):
+def publish(state, job_id, status, *, code=None, expires_at=None, reason=None):
+    if reason:
+        state.set('setup-failure/' + job_id, reason)
     with state.connect() as db:
         db.execute("UPDATE setup_jobs SET status=?,code=?,expires=COALESCE(?,expires),updated=?,ticket=CASE WHEN ? THEN NULL ELSE ticket END WHERE id=?",
                    (status, code, expires_at, time.time(), status in TERMINAL, job_id))
@@ -99,7 +107,7 @@ async def command(state, service, ticket, name, *, status_only=False, wait_secon
         active = db.execute("SELECT id FROM setup_jobs WHERE status IN ('pending','ready') AND expires > ?", (time.time(),)).fetchone()
         if active and active["id"] != job_id:
             raise ValueError("Another pairing attempt is active. Cancel it in Jr. before starting a new one")
-        db.execute("INSERT OR IGNORE INTO setup_jobs VALUES (?,?,?,'pending',NULL,?,?)", (job_id, ticket, name, intent["expires_at"], time.time()))
+        db.execute("INSERT OR IGNORE INTO setup_jobs (id,ticket,name,status,code,expires,updated) VALUES (?,?,?,'pending',NULL,?,?)", (job_id, ticket, name, intent["expires_at"], time.time()))
     deadline = time.monotonic() + wait_seconds
     while time.monotonic() < deadline:
         value = result(state, job_id)
@@ -113,18 +121,19 @@ async def perform(state, service, job):
     try:
         await run(state, service, job["ticket"], job["name"],
                   report=lambda status, **fields: publish(state, job["id"], status, **fields))
-    except SetupExpired:
-        publish(state, job["id"], "expired")
+    except SetupFailure as exc:
+        publish(state, job['id'], 'expired' if exc.reason == 'expired' else 'failed', reason=exc.reason)
     except (aiohttp.ClientError, OSError, asyncio.TimeoutError):
         await asyncio.sleep(3)  # Same persisted job and cryptographic state retry after transport recovery.
     except ServiceError as exc:
         if exc.status in {429, 500, 502, 503, 504}:
             await asyncio.sleep(10)
         else:
-            publish(state, job["id"], "failed")
+            reason = {410: 'expired', 404: 'unavailable', 401: 'rejected', 403: 'rejected', 409: 'conflict'}.get(exc.status, 'internal')
+            publish(state, job['id'], 'expired' if reason == 'expired' else 'failed', reason=reason)
     except Exception:
         # Unexpected failures are terminal and sanitized, never a success or an endless ready state.
-        publish(state, job["id"], "failed")
+        publish(state, job["id"], "failed", reason="internal")
 
 
 async def watch(state, service):

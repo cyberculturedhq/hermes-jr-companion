@@ -41,22 +41,15 @@ Rollback refuses to overwrite subsequent local code changes. Backups and private
 
 Then restart loaded Hermes processes when idle and run `hermes jr doctor`. Keep backups until you are satisfied with the update. Never delete private state to repair installed code.
 
-## First upgrade from 0.2 or a development checkout
+## Updating an older companion
 
-Older versions do not have the managed installer. The installable plugin now lives in the repository’s `plugin/` directory, separate from server code and tests. For this first upgrade, record your current version/revision, preserve any local edits, and stop the bridge. In each installed profile, use the native installer with the new subdirectory source and the commit of the desired stable release:
+If an older updater refuses a release that removes an unused dependency, download the current `install.py` as shown in [INSTALL.md](INSTALL.md) and run it with `--update`, only for an explicitly requested update when Hermes work is idle. It loads the signed release's managed updater, preserves profile activation choices, and uses the same `hermes jr rollback` record and automatic recovery. Normal setup without `--update` never upgrades an installed companion.
 
-```sh
-hermes jr service stop
-hermes plugins install 'https://github.com/cyberculturedhq/hermes-jr-companion.git#plugin' --ref COMMIT_SHA --force --no-enable
-/path/to/hermes/python -m pip install /path/to/profile-home/plugins/hermes-jr
-hermes plugins doctor /path/to/profile-home/plugins/hermes-jr --ci
-```
-
-Use `hermes --profile PROFILE plugins ...` for named profiles. Install the Python package once per distinct Hermes environment. Preserve existing activation settings; do not enable previously disabled profiles. Restart loaded Hermes processes when idle, start the bridge, and run doctor. This first manual migration has no automatic rollback backup; keep your previous files until validation succeeds.
+Removed requirements leave shared packages installed. Added or changed requirements, local source edits, and unsupported layouts stop before replacement; report the specific constraint rather than overwriting the user's setup. Diagnose connection failures with [STARTUP.md](STARTUP.md), not a reinstall.
 
 ## Limits and release policy
 
-Managed updates support standard, unmodified native installations using the official `.git#plugin` source. Forks, editable installs, linked directories, dependency changes, and protocol/state migrations need release-specific manual instructions. The updater does not change shared dependencies or silently migrate data.
+Managed updates support standard, unmodified native installations using the official `.git#plugin` source. Forks, editable installs, linked directories, added or changed dependency requirements, and protocol/state migrations need release-specific manual instructions. The updater does not change shared dependencies or silently migrate data.
 
 Checks use stable `vMAJOR.MINOR.PATCH` GitHub releases, not development `main`. GitHub receives the host’s network address and a generic user agent, but no pairing or Hermes credentials. Failed checks do not interrupt the bridge. iPhone notices expire after seven days without a successful fresh check.
 

@@ -20,7 +20,7 @@ class BootstrapTests(unittest.TestCase):
         def fetch(path):
             return release if path == '/releases/latest' else {'object': {'sha': commit, 'type': 'commit'}}
         with patch.object(bootstrap, 'get_json', side_effect=fetch), patch.object(bootstrap, 'PUBLIC_KEY', key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()):
-            self.assertEqual(bootstrap.release(), ('0.12.0', commit))
+            self.assertEqual(bootstrap.release()['commit'], commit)
             commit = 'b' * 40
             with self.assertRaises(Exception): bootstrap.release()
 
@@ -39,3 +39,24 @@ class BootstrapTests(unittest.TestCase):
             path = bootstrap.hermes_python()
             self.assertTrue(Path(path).is_absolute())
             self.assertIn('import hermes_cli', run.call_args.args[0][-1])
+
+    def test_repair_or_pairing_never_downloads_or_changes_existing_code(self):
+        health = {'installation': {'status': 'consistent'}, 'service': 'ok', 'dashboard_rpc': 'ok'}
+        with patch.object(bootstrap.importlib.metadata, 'version', return_value='0.12.0'), \
+             patch.object(bootstrap, 'inspect', side_effect=[health, {'manager_active': True}, {'listening': True, 'manager_active': True}]), \
+             patch.object(bootstrap, 'release') as release, patch.object(bootstrap, 'profiles') as profiles, \
+             patch.object(bootstrap.subprocess, 'run') as commands:
+            bootstrap.install()
+            release.assert_not_called(); profiles.assert_not_called(); commands.assert_not_called()
+
+    def test_unhealthy_existing_install_stops_without_mutation(self):
+        with patch.object(bootstrap.importlib.metadata, 'version', return_value='0.12.0'), \
+             patch.object(bootstrap, 'inspect', side_effect=[{'installation': {'status': 'mismatch'}}, {}, {}]), \
+             patch.object(bootstrap, 'release') as release, patch.object(bootstrap.subprocess, 'run') as commands:
+            with self.assertRaisesRegex(ValueError, 'do not match'): bootstrap.install()
+            release.assert_not_called(); commands.assert_not_called()
+
+    def test_external_listener_is_not_claimed_as_persistent_startup(self):
+        health = {'installation': {'status': 'consistent'}, 'service': 'ok', 'dashboard_rpc': 'ok'}
+        with patch.object(bootstrap, 'inspect', side_effect=[health, {'manager_active': True}, {'listening': True, 'manager_active': False}]):
+            with self.assertRaisesRegex(ValueError, 'externally managed'): bootstrap.reuse('0.12.0')

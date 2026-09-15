@@ -4,6 +4,10 @@ The Hermes plugin for **Hermes Jr.**, our iPhone app.
 
 Connect to your Hermes agent from your phone and get notified when a conversation you follow finishes or needs your attention. The companion runs in the background on your Hermes computer. **Your conversations and notification details are encrypted before they reach our relay.**
 
+## Connecting an iPhone
+
+If the user supplied a setup ticket, follow the current [INSTALL.md](INSTALL.md). It covers first installation and reusing an existing companion. Installation and pairing commands live there. Fetch the current file in terminal if a web extractor returns older instructions.
+
 ## Private by design
 
 Your Hermes computer and paired iPhone handle the private content. Our relay delivers encrypted data.
