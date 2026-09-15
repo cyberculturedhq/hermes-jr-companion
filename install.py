@@ -83,7 +83,7 @@ def release():
         raise ValueError('Release signature is missing or ambiguous.')
     message = f'hermes-jr-release-v1\n{REPO}\n{tag.lstrip("v")}\n{commit}\n'.encode()
     Ed25519PublicKey.from_public_bytes(bytes.fromhex(PUBLIC_KEY)).verify(base64.b64decode(signatures[0], validate=True), message)
-    return tag.lstrip('v'), commit
+    return {'latest': tag.lstrip('v'), 'commit': commit, 'signature': signatures[0], 'state': 'available'}
 
 
 def profiles():
@@ -99,14 +99,51 @@ def profiles():
     return homes
 
 
-def install():
-    target, commit = release()
+HANDOFF = ('Follow INSTALL.md step 2 with the phone ticket. Show only the comparison code and the phone action, '
+           'then run completion_watch.arguments in the same turn. After connected, say only: Your iPhone is connected. '
+           'Keep Python paths, commands, versions and JSON out of the user handoff.')
+
+
+def inspect(command):
+    result = subprocess.run([sys.executable, '-m', 'hermes_jr.cli', *command],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=45)
+    if result.returncode:
+        raise ValueError('The installed companion could not be checked. Follow STARTUP.md to diagnose it; no code was changed.')
+    return json.loads(result.stdout)
+
+
+def reuse(installed):
+    # No GitHub access, package replacement, profile activation or service restart.
+    if version(installed) < (0, 11, 0):
+        raise ValueError('This companion needs an update for the current pairing flow. Ask the user before updating; keep the existing installation.')
+    health = inspect(['doctor'])
+    manager = inspect(['service', 'status'])
+    backend = inspect(['backend', 'status'])
+    if health.get('installation', {}).get('status') != 'consistent':
+        raise ValueError('The installed companion copies do not match. Follow STARTUP.md to repair the reported installation; no update was performed.')
+    if not manager.get('manager_active') or not backend.get('listening'):
+        raise ValueError('The companion or backend is stopped. Follow STARTUP.md to restore startup; no reinstall or update was performed.')
+    if not backend.get('manager_active'):
+        raise ValueError('The backend is externally managed. Verify its supervisor using STARTUP.md before pairing; no service was changed.')
+    if health.get('service') != 'ok' or health.get('dashboard_rpc') != 'ok':
+        raise ValueError('Connection checks failed. Run hermes jr doctor and fix the reported connection problem; no reinstall or update was performed.')
+    print(json.dumps({'status': 'ready', 'version': installed, 'python': sys.executable,
+                      'reused': True, 'next_step': HANDOFF}), flush=True)
+
+
+def install(update=False):
     try:
         installed = importlib.metadata.version('hermes-jr-companion')
     except importlib.metadata.PackageNotFoundError:
         installed = None
-    if installed and version(installed) > version(target):
-        raise ValueError('Installed companion is newer than the stable release. No downgrade was made.')
+    if installed and not update:
+        return reuse(installed)
+    if update and not installed:
+        raise ValueError('No companion is installed. Run without --update for first installation.')
+    selected = release()
+    target, commit = selected['latest'], selected['commit']
+    if installed and version(installed) >= version(target):
+        return reuse(installed)
     homes = profiles()
     from hermes_constants import get_default_hermes_root
     backups = get_default_hermes_root() / 'backups/hermes-jr-installer'
@@ -138,6 +175,15 @@ def install():
     manifest = (candidate / 'plugin.yaml').read_text()
     if not re.search(r'^version:\s*[\"\']?' + re.escape(target) + r'[\"\']?\s*$', manifest, re.M):
         raise ValueError('Native plugin version does not match the signed release.')
+    if installed:
+        # All explicit upgrades use the same managed updater and rollback record.
+        # Load the verified candidate in a separate process so old updater versions
+        # can also handle a release that only removes an unused dependency.
+        code = ('import sys,json; sys.path.insert(0,sys.argv[1]); '
+                'from hermes_jr.installer import install; from hermes_jr.state import State; '
+                'install(State(),json.loads(sys.argv[2]))')
+        run(['-c', code, str(candidate / 'src'), json.dumps(selected)])
+        return reuse(target)
     wheels = work / 'wheels'
     constraints = work / 'constraints.txt'
     constraints.write_text('\n'.join(sorted({d.metadata['Name'] + '==' + d.version for d in importlib.metadata.distributions()
@@ -152,22 +198,12 @@ def install():
     site = Path(sysconfig.get_path('purelib'))
     resources = [site / 'hermes_jr', site / ('hermes_jr_companion-' + target + '.dist-info'),
                  Path(sysconfig.get_path('scripts')) / 'hermes-jr']
-    if installed:
-        distribution = importlib.metadata.distribution('hermes-jr-companion')
-        direct = json.loads(distribution.read_text('direct_url.json') or '{}')
-        if direct.get('dir_info', {}).get('editable'):
-            raise ValueError('Editable companion installation requires a manual update.')
-        resources += [Path(distribution.locate_file(f.parts[0])) for f in distribution.files or [] if f.parts[0].endswith('.dist-info')][:1]
+    resources += [Path(distribution.locate_file(f.parts[0])) for f in distribution.files or [] if f.parts[0].endswith('.dist-info')][:1]
     resources += [p for home in homes for p in (home / 'plugins/hermes-jr', home / 'plugins/.install-metadata.json')]
-    prior_service = json.loads(run(['-m', 'hermes_jr.cli', 'service', 'status'], capture=True)) if installed else {}
-    if prior_service.get('bridge_running') and not prior_service.get('manager_active'):
-        raise ValueError('Stop the foreground companion bridge before running installation.')
     snapshot = recovery.Snapshot.create(work / 'before', resources)
     # Preserve all existing files (including locally changed/legacy layouts) in that private backup.
     try:
         snapshot.ensure_unchanged('before')
-        if prior_service.get('manager_active'):
-            run(['-m', 'hermes_jr.cli', 'service', 'stop'])
         for home in homes:
             native(home)
         run(['-m', 'pip', 'install', '--no-index', '--find-links', str(wheels), '--constraint', str(constraints), str(own[0])])
@@ -178,8 +214,6 @@ def install():
         snapshot.complete()
     except BaseException:
         snapshot.restore(check_current=False)
-        if prior_service.get('manager_active'):
-            run(['-m', 'hermes_jr.cli', 'service', 'start'])
         raise
     for home in homes:
         run(['-m', 'hermes_cli.main', 'plugins', 'enable', 'hermes-jr', '--no-allow-tool-override'], home)
@@ -194,24 +228,26 @@ def install():
     if not backend['listening']:
         run(['-m', 'hermes_jr.cli', 'backend', 'install'])
     elif not backend['manager_active']:
-        print('Existing backend listener retained. Verify its external supervisor before calling startup complete.', flush=True)
+        raise ValueError('An existing backend is listening, but its startup supervisor is not verified. Follow STARTUP.md to verify it; no existing backend was changed.')
     manager = json.loads(run(['-m', 'hermes_jr.cli', 'service', 'status'], capture=True))
     run(['-m', 'hermes_jr.cli', 'service', 'restart' if manager['installed'] else 'install'])
     for _ in range(15):
         health = json.loads(run(['-m', 'hermes_jr.cli', 'doctor'], capture=True))
         if health.get('installation', {}).get('status') == 'consistent' and health.get('service') == 'ok' and health.get('dashboard_rpc') == 'ok':
             print(json.dumps({'status': 'ready', 'version': target, 'python': sys.executable,
-                              'next_step': 'Run this Python with -m hermes_jr.cli pair --ticket and the phone ticket. Show the returned code, then run completion_watch.arguments in the same turn.'}), flush=True)
+                              'next_step': HANDOFF}), flush=True)
             return
         time.sleep(1)
     raise ValueError('Installed, but connection checks did not pass. Run hermes jr doctor; keep the installation and fix that specific failure.')
 
 
 def main():
-    argparse.ArgumentParser(description=__doc__).parse_args()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--update', action='store_true', help='Install an explicitly requested update when Hermes work is idle')
+    args = parser.parse_args()
     python = hermes_python()
     if os.path.abspath(sys.executable) != python:
-        os.execv(python, [python, str(Path(__file__).resolve())])
+        os.execv(python, [python, str(Path(__file__).resolve()), *sys.argv[1:]])
     import fcntl
     from hermes_constants import get_default_hermes_root
     directory = get_default_hermes_root() / 'backups/hermes-jr-installer'
@@ -219,7 +255,7 @@ def main():
     with (directory / 'install.lock').open('a') as handle:
         try: fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError: raise ValueError('Another Hermes Jr installer is running.') from None
-        install()
+        install(update=args.update)
 
 
 if __name__ == '__main__':

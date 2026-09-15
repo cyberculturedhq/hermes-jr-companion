@@ -14,6 +14,7 @@ from . import setup_crypto as crypto
 from .secure_channel import generate_private_key, public_key
 from .service import read_bounded, ServiceError
 from .state import token
+from .setup_failures import SetupFailure
 
 
 class SetupBroker:
@@ -31,8 +32,9 @@ class SetupBroker:
             return json.loads(raw)
 
 
-class SetupExpired(ValueError):
-    pass
+class SetupExpired(SetupFailure):
+    def __init__(self, message=None):
+        super().__init__('expired')
 
 
 async def run(state, service, ticket, name, report=None):
@@ -59,7 +61,7 @@ async def run(state, service, ticket, name, report=None):
             if saved.get("status") == "connected":
                 if report: report("connected")
                 return
-            raise ValueError("This setup attempt has ended. Create a new prompt in Hermes Jr.")
+            raise SetupFailure(saved.get('reason', 'internal'))
         host_private = crypto.decode(state.get("host_private_key"), 32)
         if not saved:
             host_name = "".join(c for c in socket.gethostname() if 32 <= ord(c) < 127)[:80] or "Hermes"
@@ -71,7 +73,7 @@ async def run(state, service, ticket, name, report=None):
             state.set(record_key, saved)  # Commit private state BEFORE publishing anything; reuse on retry.
         claim = saved["claim"]
         if saved["ticket_hash"] != hashlib.sha256(ticket.encode()).hexdigest() or claim["host_public_key"] != crypto.encode(public_key(host_private)):
-            raise ValueError("Setup identity changed. Create a new prompt in Hermes Jr.")
+            raise SetupFailure('verification')
         if "credential" not in saved:
             # Client-chosen credential permits an identical retry after an uncertain response.
             saved["credential"] = token()
@@ -91,11 +93,11 @@ async def run(state, service, ticket, name, report=None):
                         if report: report("connected")
                         else: print("You’re connected. Your conversations are ready in Hermes Jr.", flush=True)
                         return
-                    raise ValueError("Setup was cancelled or another installation was selected. Create a new prompt.")
+                    raise SetupFailure('cancelled')
                 remote_key = remote.get("phone_ephemeral")
                 if remote_key:
                     if saved.get("phone_ephemeral") not in (None, remote_key):
-                        raise ValueError("The phone's setup key changed. Create a new prompt.")
+                        raise SetupFailure('verification')
                     if not saved.get("phone_ephemeral"):
                         saved.update(phone_ephemeral=remote_key, deadline=min(intent["expires_at"], int(time.time()) + 300))
                         state.set(record_key, saved)
@@ -111,7 +113,7 @@ async def run(state, service, ticket, name, report=None):
                         displayed = True
                     if remote.get("confirmation"):
                         if not hmac.compare_digest(remote["confirmation"], crypto.confirmation(private, phone, transcript)):
-                            raise ValueError("The pairing confirmation could not be authenticated")
+                            raise SetupFailure('verification')
                         if "envelope" not in saved:
                             if "device_id" not in saved:
                                 saved.update(device_id=str(uuid.uuid4()), device_token=token(), pairing_secret=token())
@@ -147,7 +149,7 @@ async def run(state, service, ticket, name, report=None):
         saved = state.get(record_key) or {}
         if saved.get("device_id") and not (state.device(saved["device_id"]) or {}).get("approved"):
             state.revoke(saved["device_id"])
-        state.set(record_key, {"terminal": True, "expires_at": intent["expires_at"]})
+        state.set(record_key, {"terminal": True, "reason": getattr(exc, "reason", "internal"), "expires_at": intent["expires_at"]})
         raise
     finally:
         os.close(fd)

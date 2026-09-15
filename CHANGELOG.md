@@ -1,3 +1,11 @@
+## 0.13.0
+
+- Reuse a healthy installed companion during setup; updates remain explicit.
+- Preserve profile activation choices and share the managed update/rollback path, including removed dependencies.
+- Check the updated connection before committing an update; restore prior code on failure.
+- Carry sanitized pairing failure reasons and recovery actions to Hermes.
+- Restore the minimal phone prompt and concise user handoff; remove the remaining bundled QR guide.
+
 # 0.12.0
 
 - Numeric comparison is the only new pairing path. Remove browser/scanner pairing, manual fingerprint commands, and the QR dependency.

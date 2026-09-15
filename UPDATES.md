@@ -41,15 +41,15 @@ Rollback refuses to overwrite subsequent local code changes. Backups and private
 
 Then restart loaded Hermes processes when idle and run `hermes jr doctor`. Keep backups until you are satisfied with the update. Never delete private state to repair installed code.
 
-## Repair an installation or update changed dependencies
+## Updating an older companion
 
-If the managed updater reports an unsupported layout or dependency change, run the checked installer in [INSTALL.md](INSTALL.md). It backs up the existing plugin/package before replacement and preserves the installed versions of shared dependencies. Incompatible dependencies stop installation instead of upgrading Hermes’s environment. It enables the companion across existing profiles, so use the managed updater when you want previously disabled profiles to remain disabled.
+If an older updater refuses a release that removes an unused dependency, download the current `install.py` as shown in [INSTALL.md](INSTALL.md) and run it with `--update`, only for an explicitly requested update when Hermes work is idle. It loads the signed release's managed updater, preserves profile activation choices, and uses the same `hermes jr rollback` record and automatic recovery. Normal setup without `--update` never upgrades an installed companion.
 
-Version 0.12 removes the unused QR dependency and therefore uses this installer when upgrading from 0.11. Existing pairings remain valid.
+Removed requirements leave shared packages installed. Added or changed requirements, local source edits, and unsupported layouts stop before replacement; report the specific constraint rather than overwriting the user's setup. Diagnose connection failures with [STARTUP.md](STARTUP.md), not a reinstall.
 
 ## Limits and release policy
 
-Managed updates support standard, unmodified native installations using the official `.git#plugin` source. Forks, editable installs, linked directories, dependency changes, and protocol/state migrations need release-specific manual instructions. The updater does not change shared dependencies or silently migrate data.
+Managed updates support standard, unmodified native installations using the official `.git#plugin` source. Forks, editable installs, linked directories, added or changed dependency requirements, and protocol/state migrations need release-specific manual instructions. The updater does not change shared dependencies or silently migrate data.
 
 Checks use stable `vMAJOR.MINOR.PATCH` GitHub releases, not development `main`. GitHub receives the host’s network address and a generic user agent, but no pairing or Hermes credentials. Failed checks do not interrupt the bridge. iPhone notices expire after seven days without a successful fresh check.
 

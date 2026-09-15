@@ -131,9 +131,26 @@ def validate_wheel(wheel, expected_version, installed):
         metadata = BytesParser().parsebytes(archive.read(infos[0]))
         if metadata['Name'] != 'hermes-jr-companion' or metadata['Version'] != expected_version:
             raise ValueError('Unexpected package identity')
-        if sorted(metadata.get_all('Requires-Dist') or []) != sorted(installed.metadata.get_all('Requires-Dist') or []):
-            raise ValueError('This release changes dependencies and requires a manual update; no installed files were changed')
+        if not set(metadata.get_all('Requires-Dist') or []).issubset(set(installed.metadata.get_all('Requires-Dist') or [])):
+            raise ValueError('This release adds or changes dependency requirements; no installed files were changed')
         return dirname
+
+
+def verify_connection(state):
+    """Check the newly imported code and live connection before committing an update."""
+    if not state.get('service_url'):
+        return  # An unconfigured installation has no live connection to validate.
+    result = subprocess.run([sys.executable, '-m', 'hermes_jr.cli', 'doctor'],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=45)
+    try:
+        health = json.loads(result.stdout)
+        valid = (result.returncode == 0 and health.get('service') == 'ok'
+                 and health.get('dashboard_rpc') == 'ok'
+                 and health.get('installation', {}).get('status') == 'consistent')
+    except (ValueError, TypeError):
+        valid = False
+    if not valid:
+        raise ValueError('Updated companion failed its connection checks')
 
 
 def install(state, release):
@@ -197,6 +214,7 @@ def install(state, release):
                 for home, _, _ in profiles:
                     native_install(home, release['commit'], log)
                 run([sys.executable, '-m', 'pip', 'install', '--no-deps', '--force-reinstall', str(wheels[0])], log=log)
+                run([sys.executable, '-m', 'pip', 'check'], log=log)
                 run([sys.executable, '-I', '-c', 'from hermes_jr import cli, daemon; from hermes_jr.updates import installed_version; import argparse; assert installed_version() == ' + repr(release['latest']) + '; cli.configure_parser(argparse.ArgumentParser())'], log=log)
                 from .installation_health import manifest_version
                 for home, plugin, metadata in profiles:
@@ -205,6 +223,7 @@ def install(state, release):
                     run([sys.executable, '-m', 'hermes_cli.main', 'plugins', 'doctor', str(plugin), '--ci'], home=home, log=log)
             if snapshot.journal['restart']:
                 manager.start()
+                verify_connection(state)
             snapshot.complete()
         except BaseException:
             if snapshot.journal['phase'] == 'prepared':

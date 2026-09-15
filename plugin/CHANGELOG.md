@@ -1,3 +1,19 @@
+## 0.13.0
+
+- Reuse a healthy installed companion during setup; updates remain explicit.
+- Preserve profile activation choices and share the managed update/rollback path, including removed dependencies.
+- Check the updated connection before committing an update; restore prior code on failure.
+- Carry sanitized pairing failure reasons and recovery actions to Hermes.
+- Restore the minimal phone prompt and concise user handoff; remove the remaining bundled QR guide.
+
+# 0.12.0
+
+- Numeric comparison is the only new pairing path. Remove browser/scanner pairing, manual fingerprint commands, and the QR dependency.
+- Add a signed-release installer that uses native Hermes installation across profiles, preserves dependency versions, backs up replaced code, and checks services.
+- Consolidate setup instructions around the installer and the existing bounded pairing/watch commands.
+
+Earlier entries below describe historical releases, not current setup instructions.
+
 ## 0.11.0
 
 - Show the pairing code before a separate bounded foreground waiter, so Hermes resumes automatically after phone confirmation without model-generated notification flags or custom tool availability.
