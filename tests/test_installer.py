@@ -160,4 +160,4 @@ class ProfileDiscoveryTests(unittest.TestCase):
             constants=types.SimpleNamespace(get_default_hermes_root=lambda:root,
                 get_hermes_home=lambda:active,named_profile_is_deleted=lambda p:False)
             with patch.dict(sys.modules,{'hermes_constants':constants}):
-                self.assertEqual({p[0] for p in installer.installed_profiles()},{root,active})
+                self.assertEqual({p[0] for p in installer.installed_profiles()},{root.resolve(),active})
