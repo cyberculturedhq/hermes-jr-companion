@@ -183,7 +183,10 @@ def install(update=False):
                 'from hermes_jr.installer import install; from hermes_jr.state import State; '
                 'install(State(),json.loads(sys.argv[2]))')
         run(['-c', code, str(candidate / 'src'), json.dumps(selected)])
-        return reuse(target)
+        print(json.dumps({'status': 'updated', 'version': target,
+                          'message': 'The companion was updated. Existing profile choices and pairings were preserved.',
+                          'next_step': 'Restart loaded Hermes sessions when idle, as described in UPDATES.md. Pairing is a separate action.'}), flush=True)
+        return
     wheels = work / 'wheels'
     constraints = work / 'constraints.txt'
     constraints.write_text('\n'.join(sorted({d.metadata['Name'] + '==' + d.version for d in importlib.metadata.distributions()

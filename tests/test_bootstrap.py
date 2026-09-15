@@ -60,3 +60,28 @@ class BootstrapTests(unittest.TestCase):
         health = {'installation': {'status': 'consistent'}, 'service': 'ok', 'dashboard_rpc': 'ok'}
         with patch.object(bootstrap, 'inspect', side_effect=[health, {'manager_active': True}, {'listening': True, 'manager_active': False}]):
             with self.assertRaisesRegex(ValueError, 'externally managed'): bootstrap.reuse('0.12.0')
+
+    def test_explicit_update_delegates_and_reports_update_without_pairing_checks(self):
+        import contextlib,io,json,sys,tempfile,types
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            def command(args, **kwargs):
+                if 'plugins' in args and 'install' in args:
+                    candidate = Path(kwargs['env']['HERMES_HOME']) / 'plugins/hermes-jr'
+                    candidate.mkdir(parents=True)
+                    (candidate/'plugin.yaml').write_text('version: 0.13.0\n')
+                return types.SimpleNamespace(returncode=0, stdout=b'')
+            constants = types.SimpleNamespace(get_default_hermes_root=lambda:root)
+            output=io.StringIO()
+            with patch.dict(sys.modules, {'hermes_constants':constants}), \
+                 patch.object(bootstrap.importlib.metadata,'version',return_value='0.12.0'), \
+                 patch.object(bootstrap,'release',return_value={'latest':'0.13.0','commit':'a'*40,'signature':'fixture','state':'available'}), \
+                 patch.object(bootstrap,'profiles',return_value=[]), \
+                 patch.object(bootstrap.subprocess,'run',side_effect=command) as run, \
+                 patch.object(bootstrap,'reuse') as reuse, contextlib.redirect_stdout(output):
+                bootstrap.install(update=True)
+                reuse.assert_not_called()
+                self.assertEqual(json.loads(output.getvalue().splitlines()[-1])['status'],'updated')
+                calls=[c.args[0] for c in run.call_args_list]
+                self.assertTrue(any('from hermes_jr.installer import install' in str(c) for c in calls))
+                self.assertFalse(any('enable' in c for c in calls))
