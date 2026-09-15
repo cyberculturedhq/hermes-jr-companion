@@ -171,9 +171,6 @@ protocol. See [HPKE.md](HPKE.md) for its remaining limitations.
   It never contains codes, enrollment, or approval. Notification permission is
   optional. The app polls while foregrounded and fetches again on reopening.
   Stale pushes cannot authorize or resurrect an expired setup.
-- QR/private-invitation pairing remains an explicit fallback for existing
-  installations, self-hosted services, or unavailable pairing service. Errors
-  in this protocol never automatically downgrade to that path.
 
 ## Setup and verification
 
@@ -182,7 +179,7 @@ Generate a signing key into a private file with
 Configure its contents as the service's `SETUP_TICKET_PRIVATE_KEY` secret using
 Wrangler; use `.dev.vars` only for local development. Deploy the `v3-setup`
 Durable Object migration alongside the service. The iOS app and updated companion
-must be released together with service support. Companion 0.9.0 owns pairing in the service: `pair --ticket` returns pending or ready before approval, and `pair --ticket ... --status` reads completion. Only `connected` indicates success; expiry and failure exit nonzero. The app onboarding does not offer the legacy QR path.
+must be released together with service support. The companion owns pairing in the service: `pair --ticket` returns pending or ready before approval, and `pair --ticket ... --status` reads completion. Only `connected` indicates success; expiry and failure exit nonzero. Numeric comparison is the only supported new pairing flow.
 
 In the `hermes-ios` development workspace, run the Python tests, relay tests/typecheck, iOS tests with simulator signing
 enabled (Keychain requires entitlements), and

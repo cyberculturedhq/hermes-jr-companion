@@ -15,7 +15,7 @@ import uuid
 import aiohttp
 from .gateway import dashboard_url
 from .service import Service, client_session, validate_service_url
-from .state import State, token
+from .state import State
 
 
 def encoded(value):
@@ -39,20 +39,12 @@ def configure_parser(parser):
     update.add_argument("--install", action="store_true", help="Explicitly install the latest compatible stable release with rollback; use when Hermes work is idle")
     commands.add_parser("rollback", help="Restore the code saved by the last managed update; preserve pairings")
     update.add_argument("--checks", choices=["on", "off"], help="Enable or disable automatic daily release checks")
-    pair = commands.add_parser("pair", help="Create a ten-minute pairing invitation")
+    pair = commands.add_parser("pair", help="Connect using the phone’s setup ticket and numeric comparison")
     pair.add_argument("--name", default="iPhone")
     pair.add_argument("--status", action="store_true", help="Read the service-owned pairing result for --ticket; never waits for approval")
-    pair.add_argument("--no-wait", action="store_true", help="Return after opening the page instead of waiting for the phone")
-    output = pair.add_mutually_exclusive_group()
+    output = pair.add_mutually_exclusive_group(required=True)
     output.add_argument("--watch", metavar="JOB_ID", help="Wait for pairing completion after showing the comparison code to the user")
     output.add_argument("--ticket", help="Pair with the iPhone that created this public HJ1 setup ticket; compare the displayed codes")
-    output.add_argument("--browser", action="store_true", help="Open a private branded QR page (default)")
-    output.add_argument("--json", action="store_true", help="Output invitation JSON for automation")
-    output.add_argument("--url", action="store_true", help="Output a hermes-jr:// pairing URL without opening a browser")
-    output.add_argument("--qr", action="store_true", help="Open the browser QR page (alias for --browser; no terminal QR output)")
-    approve = commands.add_parser("approve", help="Approve a phone after checking its fingerprint")
-    approve.add_argument("device_id")
-    approve.add_argument("--fingerprint", required=True, help="SHA256 key fingerprint shown on the phone")
     revoke = commands.add_parser("revoke", help="Immediately revoke this device locally and at the service")
     revoke.add_argument("device_id")
     commands.add_parser("devices", help="List device IDs and public key fingerprints")
@@ -63,18 +55,6 @@ def configure_parser(parser):
 def fingerprint(device):
     value = device.get("public_key")
     return hashlib.sha256(base64.urlsafe_b64decode(value + "=")).hexdigest() if value else None
-
-
-def print_pairing(payload, *, as_url=False, out=None, err=None):
-    """Render an already-created invitation; this function never creates state or credentials."""
-    out, err = out or sys.stdout, err or sys.stderr
-    compact = json.dumps(payload, separators=(",", ":"))
-    url = "hermes-jr://pair#" + encoded(compact.encode())
-    print(url if as_url else compact, file=out)
-    host_key = base64.urlsafe_b64decode(payload["host_public_key"] + "=")
-    print("Host fingerprint (SHA256): " + hashlib.sha256(host_key).hexdigest(), file=err)
-    print("Compare this host fingerprint with Hermes Jr. before connecting.", file=err)
-    print("Keep this invitation private. Hermes must inspect the pending device and approve it after checking the fingerprint supplied by the user; do not ask the user to run commands.", file=err)
 
 
 async def execute(args):
@@ -144,8 +124,8 @@ async def execute(args):
             print("Companion configured. Follow INSTALL.md to verify backend startup and run hermes jr service install.")
         elif args.jr_command == "pair":
             if args.watch:
-                if args.status or args.no_wait:
-                    raise ValueError("--watch cannot be combined with --status or --no-wait")
+                if args.status:
+                    raise ValueError("--watch cannot be combined with --status")
                 from .setup_jobs import wait_for_completion
                 result = await wait_for_completion(state, args.watch)
                 print(json.dumps(result, ensure_ascii=False), flush=True)
@@ -153,47 +133,12 @@ async def execute(args):
                     raise SystemExit(1)
                 return
             if getattr(args, "ticket", None):
-                if args.no_wait:
-                    raise ValueError("Ticket pairing already returns before approval; omit --no-wait")
                 from .setup_jobs import command
                 result = await command(state, service, args.ticket, args.name, status_only=args.status)
                 print(json.dumps(result, ensure_ascii=False))
                 if result["status"] in {"expired", "failed", "not_found"}:
                     raise SystemExit(1)
                 return
-            if args.status:
-                raise ValueError("--status requires --ticket")
-            from .secure_channel import public_key
-            if not state.get("relay_enabled", False):
-                raise ValueError("Remote access is disabled; enable it with hermes jr setup --relay")
-            if not 1 <= len(args.name) <= 80:
-                raise ValueError("Device name must contain 1–80 characters")
-            from .cleanup import sweep
-            await sweep(state, service)
-            device = await service.add_device()
-            device_id = str(uuid.UUID(device["device_id"]))
-            secret, expires = token(), int(time.time()) + 600
-            state.add_device(device_id, args.name, device["device_token"], secret=secret, expires=expires, automatic=True)
-            payload = {"v": 1, "relay_url": state.get("service_url"), "installation_id": state.get("installation_id"),
-                       "device_id": device_id, "device_token": device["device_token"],
-                       "host_public_key": encoded(public_key(base64.urlsafe_b64decode(state.get("host_private_key") + "="))),
-                       "pairing_secret": secret, "expires_at": expires}
-            if args.url or args.json:
-                print_pairing(payload, as_url=args.url)
-            else:
-                from .pairing_page import open_page
-                page = await asyncio.to_thread(open_page, payload, state.directory)
-                if not args.no_wait:
-                    from .pairing_page import wait_for_phone
-                    await wait_for_phone(state, device_id, expires, page)
-        elif args.jr_command == "approve":
-            device_id = str(uuid.UUID(args.device_id))
-            device = state.device(device_id)
-            wanted = args.fingerprint.lower().replace(":", "").replace(" ", "")
-            if not device or fingerprint(device) != wanted:
-                raise ValueError("Fingerprint does not match the phone that claimed this invitation")
-            state.approve(device_id)
-            print("Phone approved. Its pending encrypted connection can now open Hermes.")
         elif args.jr_command == "revoke":
             device_id = str(uuid.UUID(args.device_id))
             state.revoke(device_id)  # Local authority revokes first even during an Internet outage.

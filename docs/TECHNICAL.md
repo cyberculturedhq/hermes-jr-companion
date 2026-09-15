@@ -24,36 +24,17 @@ For a real Hermes installation, follow [INSTALL.md](../INSTALL.md). It includes 
 
 No command in this repository automatically changes the user's Hermes installation or enables a plugin. `register(ctx)` only registers hooks and the `hermes jr` CLI command; it never opens sockets or starts daemons. The standalone `hermes-jr` command has the same subcommands when testing outside Hermes.
 
-## Configure and pair
+## Numeric pairing and revocation
 
-Use an existing compatible service or deploy `RelayService` first. Its service address is configurable for self hosting. Keep the Hermes dashboard bound to loopback:
-
-```sh
-hermes jr setup --service https://your-relay.example --dashboard http://127.0.0.1:9119 --relay
-hermes jr service install
-hermes jr doctor
-```
-
-The service runs independently of terminals and uses an OS lock to prevent duplicate bridges. For foreground debugging use `hermes jr run` after stopping the service. The bridge does not start Hermes itself and cannot wake a sleeping host. See [startup and diagnostics](../STARTUP.md).
-
-In another terminal:
+Follow [INSTALL.md](../INSTALL.md) with the setup ticket from Jr. The phone and host compute comparison codes independently. The user checks all three groups and confirms on the phone; enrollment then completes over the encrypted connection. Success is reported after profile discovery.
 
 ```sh
-hermes jr pair --qr
 hermes jr devices
-hermes jr approve DEVICE_UUID --fingerprint PHONE_SHA256_FINGERPRINT
-```
-
-`pair --qr` displays a terminal QR code to scan in Jr. and a pasteable pairing URL. Enlarge the terminal if the QR wraps. Use `pair --url` to copy only the `hermes-jr://pair#…` URL, or plain `pair` for raw JSON. These forms all print the **host fingerprint** to stderr; compare it with Jr.'s pairing screen before connecting. The QR renderer uses the pinned, pure-Python [`qrcode` 8.2 package](https://pypi.org/project/qrcode/8.2/) without image-library dependencies and supports redirected output or an unset `TERM`.
-
-The invitation contains private, ten-minute, single-use credentials; avoid publishing it, logging it, or putting it in shell commands. After connecting, compare the **phone fingerprint** shown in Jr. with `hermes jr devices`, then approve that phone. Owner approval is required before any Hermes API access. A consumed invitation cannot authorize another phone key. Approved devices reconnect with their pinned key after the invitation expires.
-
-```sh
 hermes jr revoke DEVICE_UUID
 hermes jr status
 ```
 
-Revocation immediately removes local authorization, follows, and notification references. If the service is offline, retry `revoke` later to remove its relay admission and APNs registration too. Remote ciphertext still cannot access the local host after local revocation.
+Revocation immediately removes local authorization, follows, and notification references. The bridge retries remote removal if the service is unavailable. Already-approved phones reconnect using their pinned keys.
 
 ## Notifications independently of relay
 
@@ -65,7 +46,7 @@ hermes jr setup --service https://your-relay.example --push
 
 Omitting `--relay` preserves its current value. Use `--no-relay` or `--no-push` to explicitly disable either feature. For a Tailscale-only user, initial setup with `--push` leaves remote access disabled. The bridge still runs to deliver the notification outbox. The iOS app registers its APNs token through the dashboard plugin API; host setup never asks users for Apple signing credentials.
 
-Only opened/followed conversations notify. The plugin queues completion, failure, human approval, and `clarify` tool events from durable session/profile identities. It excludes interrupted cleanup and smart auto-approval events, deduplicates each event, follows compression ancestry when Hermes exposes it, and suppresses alerts during a 45-second foreground presence lease renewed by the phone. Notifications contain only a generic alert and random reference; opening one fetches its local profile/session mapping after authentication. References expire after seven days. Failed service delivery retries from the private SQLite outbox.
+Only opened/followed conversations notify. The plugin queues completion, failure, human approval, and `clarify` tool events from durable session/profile identities. It excludes interrupted cleanup and smart auto-approval events, deduplicates each event, follows compression ancestry when Hermes exposes it, and suppresses alerts during a 45-second foreground presence lease renewed by the phone. Notification details are encrypted for the phone, with a generic fallback and random reference; opening one fetches its local profile/session mapping after authentication. References expire after seven days. Failed service delivery retries from the private SQLite outbox.
 
 Hermes exposes no dedicated clarification-request observer, so this version observes `pre_tool_call` for `clarify`. If another policy subsequently blocks the tool, the attempted clarification can still trigger an alert. Hooks never transmit question/command/prompt text. Hook delivery follows the profiles where this plugin is enabled; older Hermes builds may omit correlation fields, in which case the plugin safely skips the event.
 

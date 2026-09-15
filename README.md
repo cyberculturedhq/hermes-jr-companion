@@ -57,6 +57,6 @@ Updates are installed only when you ask. From 0.7.0, the companion verifies a re
 
 ## Phone-bound numeric pairing
 
-The current setup flow requires companion 0.11.0 and the matching iOS app and service updates. Service operators must configure a separate setup signing key and the new temporary-session migration before enabling it. Existing QR pairing remains available.
+The current setup flow requires companion 0.12.0 and the matching iOS app and service updates. Service operators must configure a separate setup signing key and the new temporary-session migration before enabling it.
 
 The [setup protocol](Protocol/SETUP.md) documents its trust boundaries, verification steps, limits, and test coverage. The [service guide](RelayService/README.md#phone-bound-numeric-pairing) covers deployment configuration. This new protocol integration has not had an independent security audit.

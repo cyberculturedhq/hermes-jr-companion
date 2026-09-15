@@ -140,7 +140,7 @@ Durable Object per attempt. Configure the separate `SETUP_TICKET_PRIVATE_KEY`
 secret (base64url Ed25519 PKCS#8 DER) and deploy the `v3-setup` migration before
 shipping the matching app and companion. Generate it privately with
 `Scripts/create-setup-signing-key.py`; do not reuse APNs or release-signing keys.
-Without this secret, numeric setup is unavailable and QR pairing still works.
+Without this secret, new pairing is unavailable; already-paired devices can still reconnect.
 
 `POST /v1/pairing/intents` creates the ticket and a separate owner credential.
 `GET /v1/pairing/key` exposes only the issuer's public key. Subsequent setup

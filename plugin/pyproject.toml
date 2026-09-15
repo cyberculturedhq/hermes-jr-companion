@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-jr-companion"
-version = "0.11.0"
+version = "0.12.0"
 description = "Connect the Hermes Jr. iPhone app to your Hermes agent."
 requires-python = ">=3.10"
 license = "MIT"
 readme = "README.md"
-dependencies = ["aiohttp>=3.12,<4", "fastapi>=0.115,<1", "pyhpke==0.6.5", "qrcode==8.2"]
+dependencies = ["aiohttp>=3.12,<4", "fastapi>=0.115,<1", "pyhpke==0.6.5"]
 
 [project.urls]
 Repository = "https://github.com/cyberculturedhq/hermes-jr-companion"
