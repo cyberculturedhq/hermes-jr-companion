@@ -1,13 +1,19 @@
 """Fast, fail-open lifecycle observers. Network delivery belongs to the bridge."""
 from __future__ import annotations
 import logging
+from pathlib import Path
 from .state import State
 
 log = logging.getLogger("hermes_jr")
 
 
 def register(ctx):
+    manifest_path = getattr(getattr(ctx, 'manifest', None), 'path', None)
     def record(kind, session_id, key):
+        # A native uninstall may happen while this Python conversation remains alive.
+        # Do not resurrect the state directory from callbacks loaded before removal.
+        if not Path(__file__).is_file() or (manifest_path and not Path(manifest_path).exists()):
+            return
         if not session_id or not key:
             return
         try:
