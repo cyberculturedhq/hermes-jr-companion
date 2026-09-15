@@ -201,7 +201,6 @@ def install(update=False):
     site = Path(sysconfig.get_path('purelib'))
     resources = [site / 'hermes_jr', site / ('hermes_jr_companion-' + target + '.dist-info'),
                  Path(sysconfig.get_path('scripts')) / 'hermes-jr']
-    resources += [Path(distribution.locate_file(f.parts[0])) for f in distribution.files or [] if f.parts[0].endswith('.dist-info')][:1]
     resources += [p for home in homes for p in (home / 'plugins/hermes-jr', home / 'plugins/.install-metadata.json')]
     snapshot = recovery.Snapshot.create(work / 'before', resources)
     # Preserve all existing files (including locally changed/legacy layouts) in that private backup.
