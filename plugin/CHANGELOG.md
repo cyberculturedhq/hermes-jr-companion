@@ -1,3 +1,9 @@
+## 0.13.2
+
+- Put the phone action and immediate completion watcher at the top of pairing results.
+- Recognize Python aliases in the same environment when managing the backend.
+- Remove the overlooked QR dependency from the native plugin manifest.
+
 ## 0.13.1
 
 - Point missing-backend diagnostics to persistent backend startup, distinguishing it from the messaging gateway.
