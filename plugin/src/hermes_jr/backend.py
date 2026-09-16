@@ -1,5 +1,6 @@
 """Bounded registration of a dedicated loopback backend with the user's service manager."""
 from __future__ import annotations
+import filecmp
 import hashlib
 import importlib.util
 import os
@@ -91,7 +92,7 @@ class BackendSupervisor:
         executable = Path(os.path.abspath(sys.executable))
         for alias in executable.parent.glob('python*'):
             try:
-                if alias.is_file() and alias.samefile(executable) and actual == self.definition(alias):
+                if alias.is_file() and (alias.samefile(executable) or filecmp.cmp(alias, executable, shallow=False)) and actual == self.definition(alias):
                     return True
             except OSError:
                 continue

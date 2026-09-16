@@ -1,3 +1,7 @@
+## 0.13.3
+
+- Recognize identical copied Python executables in the same environment when checking backend ownership; continue rejecting changed binaries and definitions.
+
 ## 0.13.2
 
 - Put the phone action and immediate completion watcher at the top of pairing results.
