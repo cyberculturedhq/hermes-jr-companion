@@ -147,3 +147,17 @@ class InstallerTests(unittest.TestCase):
         installer.install(self.state, self.release)
         installer.rollback(self.state)
         self.assert_old()
+
+
+class ProfileDiscoveryTests(unittest.TestCase):
+    def test_custom_active_home_is_not_omitted_from_update(self):
+        import sys
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)/'default';active=Path(temp)/'custom'
+            for home in [root,active]:
+                (home/'plugins/hermes-jr').mkdir(parents=True)
+                (home/'plugins/.install-metadata.json').write_text(json.dumps({'hermes-jr': {'source':installer.PLUGIN_SOURCE,'revision':'a'*40}}))
+            constants=types.SimpleNamespace(get_default_hermes_root=lambda:root,
+                get_hermes_home=lambda:active,named_profile_is_deleted=lambda p:False)
+            with patch.dict(sys.modules,{'hermes_constants':constants}):
+                self.assertEqual({p[0] for p in installer.installed_profiles()},{root.resolve(),active})

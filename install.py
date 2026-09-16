@@ -183,7 +183,10 @@ def install(update=False):
                 'from hermes_jr.installer import install; from hermes_jr.state import State; '
                 'install(State(),json.loads(sys.argv[2]))')
         run(['-c', code, str(candidate / 'src'), json.dumps(selected)])
-        return reuse(target)
+        print(json.dumps({'status': 'updated', 'version': target,
+                          'message': 'The companion was updated. Existing profile choices and pairings were preserved.',
+                          'next_step': 'Restart loaded Hermes sessions when idle, as described in UPDATES.md. Pairing is a separate action.'}), flush=True)
+        return
     wheels = work / 'wheels'
     constraints = work / 'constraints.txt'
     constraints.write_text('\n'.join(sorted({d.metadata['Name'] + '==' + d.version for d in importlib.metadata.distributions()
@@ -198,7 +201,6 @@ def install(update=False):
     site = Path(sysconfig.get_path('purelib'))
     resources = [site / 'hermes_jr', site / ('hermes_jr_companion-' + target + '.dist-info'),
                  Path(sysconfig.get_path('scripts')) / 'hermes-jr']
-    resources += [Path(distribution.locate_file(f.parts[0])) for f in distribution.files or [] if f.parts[0].endswith('.dist-info')][:1]
     resources += [p for home in homes for p in (home / 'plugins/hermes-jr', home / 'plugins/.install-metadata.json')]
     snapshot = recovery.Snapshot.create(work / 'before', resources)
     # Preserve all existing files (including locally changed/legacy layouts) in that private backup.

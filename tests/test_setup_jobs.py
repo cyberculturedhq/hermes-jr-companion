@@ -94,7 +94,7 @@ class SetupJobTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unavailable_backend_cannot_create_pairing(self):
         self.probe_mock.side_effect = ConnectionError('private transport details')
-        with self.assertRaisesRegex(ValueError, 'no pairing attempt was created'):
+        with self.assertRaisesRegex(ValueError, '[Nn]o pairing attempt was created'):
             await jobs.command(self.state,self.service,self.ticket,'iPhone',wait_seconds=0)
         self.assertEqual(jobs.result(self.state,jobs.identity(self.ticket))['status'], 'not_found')
         self.service.request.assert_not_awaited()

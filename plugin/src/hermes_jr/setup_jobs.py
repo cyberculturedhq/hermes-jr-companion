@@ -98,7 +98,7 @@ async def command(state, service, ticket, name, *, status_only=False, wait_secon
     try:
         await Gateway(state, service.client).probe()
     except (aiohttp.ClientError, ValueError, KeyError, OSError, asyncio.TimeoutError) as exc:
-        raise ValueError("Hermes backend is not ready. Run hermes jr doctor and restore supervised loopback backend startup before pairing; no pairing attempt was created.") from None
+        raise ValueError("Hermes backend is not ready. Run hermes jr doctor and follow its recovery action. For a missing listener, run hermes jr backend install; the messaging gateway is a different service. No pairing attempt was created.") from None
     issuer = await asyncio.wait_for(service.request("GET", "/v1/pairing/key"), 10)
     intent = setup_crypto.verify_ticket(ticket, issuer["public_key"], state.get("service_url"))
     with state.connect() as db:
