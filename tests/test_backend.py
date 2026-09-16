@@ -1,5 +1,6 @@
 from pathlib import Path
 import plistlib
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -123,3 +124,20 @@ class BackendTests(unittest.TestCase):
                 self.assertFalse(manager.owns_definition())
                 manager.path.write_bytes(manager.definition(executable) + b'changed')
                 self.assertFalse(manager.owns_definition())
+
+    def test_identical_copied_python_in_same_venv_is_an_alias(self):
+        executable = self.home / 'venv/bin/python'
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b'interpreter binary')
+        copied = executable.with_name('python3')
+        shutil.copyfile(executable, copied)
+        self.assertFalse(copied.samefile(executable))
+        for platform in ('darwin', 'linux'):
+            manager = self.manager(platform)
+            manager.path.parent.mkdir(parents=True, exist_ok=True)
+            manager.path.write_bytes(manager.definition(copied))
+            with patch('hermes_jr.backend.sys.executable', str(executable)):
+                self.assertTrue(manager.owns_definition())
+                copied.write_bytes(b'different interpreter')
+                self.assertFalse(manager.owns_definition())
+                copied.write_bytes(executable.read_bytes())
