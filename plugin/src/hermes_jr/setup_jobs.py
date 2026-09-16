@@ -47,12 +47,15 @@ def result(state, job_id):
         value['instruction'] = 'Say only the user_message; omit commands, versions, paths and JSON.'
     if status == "ready":
         value.update(code=row["code"], expires_at=row["expires"])
+        value['user_message'] = f"Check that {row['code']} matches all three groups in Jr., then tap It’s correct."
+        value['instruction'] = ('Send user_message as a brief progress message, then immediately call terminal '
+                                'with completion_watch.arguments in this same turn. Do not end your turn '
+                                'or ask for a chat reply: confirmation arrives through the watcher. '
+                                'Wait for its result before reporting completion.')
     if status in {"pending", "ready"}:
         value["completion_watch"] = {
             "name": "terminal",
-            "arguments": {"command": shlex.join([sys.executable, "-m", "hermes_jr.cli", "pair", "--watch", job_id]), "timeout": 360},
-            "instruction": "Show the ready code in a visible assistant message, then call terminal with these exact arguments in the same turn. Wait for the result before reporting completion."}
-        value["watch_command"] = "hermes jr pair --watch " + job_id
+            "arguments": {"command": shlex.join([sys.executable, "-m", "hermes_jr.cli", "pair", "--watch", job_id]), "timeout": 360}}
     return value
 
 

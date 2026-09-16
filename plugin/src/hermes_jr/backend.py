@@ -61,9 +61,9 @@ class BackendSupervisor:
         except OSError:
             return False
 
-    def definition(self):
+    def definition(self, executable=None):
         # Preserve the venv path rather than resolving it to the base interpreter.
-        args = [os.path.abspath(sys.executable), '-m', 'hermes_cli.main', 'serve',
+        args = [os.path.abspath(executable or sys.executable), '-m', 'hermes_cli.main', 'serve',
                 '--host', '127.0.0.1', '--port', str(self.port)]
         if self.platform == 'darwin':
             return plistlib.dumps({'Label': self.label, 'ProgramArguments': args,
@@ -78,11 +78,30 @@ class BackendSupervisor:
                 + '\nRestart=always\nRestartSec=10\nUMask=0077\nStandardOutput=null\nStandardError=null\n\n'
                 '[Install]\nWantedBy=default.target\n').encode()
 
+    def owns_definition(self):
+        if self.path.is_symlink():
+            return False
+        if not self.path.exists():
+            return True
+        actual = self.path.read_bytes()
+        if actual == self.definition():
+            return True
+        # Python aliases in one venv retain that venv; resolving to the base
+        # interpreter would lose it. Accept only an otherwise identical file.
+        executable = Path(os.path.abspath(sys.executable))
+        for alias in executable.parent.glob('python*'):
+            try:
+                if alias.is_file() and alias.samefile(executable) and actual == self.definition(alias):
+                    return True
+            except OSError:
+                continue
+        return False
+
     def install(self):
         if importlib.util.find_spec('hermes_cli') is None:
             raise ValueError('Run backend install with the Python environment that runs Hermes.')
         definition = self.definition()
-        if self.path.is_symlink() or (self.path.exists() and self.path.read_bytes() != definition):
+        if not self.owns_definition():
             raise ValueError('An existing backend definition differs. Inspect and reuse it; it was not overwritten.')
         if self.active():
             if not self.path.is_file():
@@ -110,7 +129,7 @@ class BackendSupervisor:
                 'next_step': 'Run hermes jr doctor; dashboard_rpc must be ok before pairing.'}
 
     def uninstall(self):
-        if self.path.is_symlink() or (self.path.exists() and self.path.read_bytes() != self.definition()):
+        if not self.owns_definition():
             raise ValueError('Backend definition was changed. Inspect it before removing its service.')
         if self.platform == 'darwin':
             if self.active():

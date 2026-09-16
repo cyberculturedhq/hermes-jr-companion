@@ -1,5 +1,5 @@
 name: hermes-jr
-version: 0.13.1
+version: 0.13.2
 description: Connect the Hermes Jr. iPhone app to your Hermes agent.
 license: MIT
 provides_hooks:
@@ -10,4 +10,3 @@ python_dependencies:
   - "aiohttp>=3.12,<4"
   - "fastapi>=0.115,<1"
   - "pyhpke==0.6.5"
-  - "qrcode==8.2"

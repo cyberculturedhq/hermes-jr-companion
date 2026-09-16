@@ -103,3 +103,23 @@ class BackendTests(unittest.TestCase):
             command.assert_called_once_with(['launchctl', 'bootout', f'{manager.domain}/{manager.label}'])
         self.assertFalse(manager.path.exists())
         self.assertEqual(unrelated.read_bytes(), b'gateway')
+
+    def test_python_alias_in_same_venv_preserves_service_ownership(self):
+        executable = self.home / 'venv/bin/python'
+        executable.parent.mkdir(parents=True)
+        executable.write_text('interpreter')
+        alias = executable.with_name('python3')
+        alias.symlink_to(executable)
+        other = self.home / 'other-venv/bin/python'
+        other.parent.mkdir(parents=True)
+        other.symlink_to(executable)
+        for platform in ('darwin', 'linux'):
+            manager = self.manager(platform)
+            manager.path.parent.mkdir(parents=True, exist_ok=True)
+            manager.path.write_bytes(manager.definition(executable))
+            with patch('hermes_jr.backend.sys.executable', str(alias)):
+                self.assertTrue(manager.owns_definition())
+                manager.path.write_bytes(manager.definition(other))
+                self.assertFalse(manager.owns_definition())
+                manager.path.write_bytes(manager.definition(executable) + b'changed')
+                self.assertFalse(manager.owns_definition())
