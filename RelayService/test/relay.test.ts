@@ -323,6 +323,9 @@ describe("generic APNs notifications", () => {
   });
 
   it("validates references, limits push bursts, and removes expired APNs registrations", async () => {
+    // Keep the burst in one window even when CI crosses a wall-clock minute.
+    const now = Date.UTC(2026, 8, 16, 0, 0, 10);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
     const install = await installation();
     const phone = await device(install);
     const path = `${devicePath(install, phone)}/push`;
@@ -335,6 +338,8 @@ describe("generic APNs notifications", () => {
     vi.mocked(fetch).mockImplementation(async () => new Response(null, { status: 200 }));
     for (let i = 1; i < LIMITS.devicePushesPerMinute; i++) expect((await request(path, "POST", install.host_token, { reference: newToken() })).status).toBe(202);
     expect((await request(path, "POST", install.host_token, { reference: newToken() })).status).toBe(429);
+    clock.mockReturnValue(now + 60_000);
+    expect((await request(path, "POST", install.host_token, { reference: newToken() })).status).toBe(202);
   });
 
   it("reports missing APNs configuration without enabling a partial integration", async () => {
