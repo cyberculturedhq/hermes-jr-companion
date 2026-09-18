@@ -51,7 +51,7 @@ jobs:
           mkdir upstream
           curl --fail --location --retry 3 "https://codeload.github.com/NousResearch/hermes-agent/tar.gz/$HERMES_SHA" | tar -xz --strip-components=1 -C upstream
       - name: Install dependencies (no provider credentials)
-        run: python -m pip install ./plugin './upstream[web]'
+        run: python -m pip install ./plugin -e './upstream[web]'
       - name: Companion regression tests
         run: python -m unittest discover -s tests -v
       - name: Check real Hermes API with mobile adapter

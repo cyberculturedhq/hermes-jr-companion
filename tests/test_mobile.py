@@ -128,6 +128,20 @@ class MobileProtocolTests(unittest.TestCase):
         self.assertEqual(adapter.incoming(error), error)
         self.assertFalse(adapter.inflight)
 
+class CapabilityEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_capabilities_require_approved_device_and_known_protocol(self):
+        from hermes_jr.api import handle
+        from unittest.mock import Mock
+        state = Mock()
+        state.device.return_value = {'approved': False}
+        with self.assertRaises(PermissionError):
+            await handle(state, 'phone', 'GET', '/v1/mobile/capabilities', {}, {'protocol': '1'}, None)
+        state.device.return_value = {'approved': True}
+        with self.assertRaises(ValueError):
+            await handle(state, 'phone', 'GET', '/v1/mobile/capabilities', {}, {'protocol': '2'}, None)
+        result = await handle(state, 'phone', 'GET', '/v1/mobile/capabilities', {}, {'protocol': '1', 'known_revision': REVISION}, None)
+        self.assertEqual(result, {'protocol': 1, 'revision': REVISION, 'unchanged': True})
+
 
 if __name__ == '__main__':
     unittest.main()
