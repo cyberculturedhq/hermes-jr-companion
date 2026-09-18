@@ -80,7 +80,7 @@ class MobileProtocolTests(unittest.TestCase):
         out = adapter.request(request('clarify.respond', {'session_id': 'session-a', 'request_id': pid, 'question_id': 'q2', 'answer': 'B'}, 'phone-2'))
         self.assertEqual(out['method'], 'clarify.lock')
         self.assertEqual(out['params'], {'request_id': 'srq-a', 'question_id': 'q2', 'answer': 'B'})
-        adapter.incoming(reply('phone-2', {'status': 'ok', 'remaining': 0}))
+        adapter.incoming(reply('phone-2', {'status': 'ok', 'remaining': []}))
         self.assertNotIn(pid, adapter.interactions)
 
     def test_cancel_invalidates_pending_card_and_prevents_stale_answer(self):

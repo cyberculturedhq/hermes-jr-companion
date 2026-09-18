@@ -96,4 +96,17 @@ else:
             rpc(kind + '.respond', {'session_id': sid, 'request_id': public_id, **answer})
             assert results == [answer], results
             settle('fixture complete')
+    frames = []
+    batch = server_requests.ServerRequest(sid, 'clarify', {'questions': [
+        {'qid': 'q1', 'question': 'First?'}, {'qid': 'q2', 'question': 'Second?'}]}, qids=['q1', 'q2'])
+    with patch.object(server_requests, '_write', frames.append):
+        server_requests._register(batch)
+        card = adapter.incoming(frames[-1])
+        public_id = card['params']['payload']['request_id']
+        first = rpc('clarify.respond', {'session_id': sid, 'request_id': public_id, 'question_id': 'q1', 'answer': 'A'})
+        assert first['remaining'] == ['q2']
+        second = rpc('clarify.respond', {'session_id': sid, 'request_id': public_id, 'question_id': 'q2', 'answer': 'B'})
+        assert second['remaining'] == [] and public_id not in adapter.interactions
+        assert batch.result == {'answers': {'q1': 'A', 'q2': 'B'}}
+        server_requests.cancel(sid)
 print('PASS: real Hermes mobile compatibility checks complete')

@@ -164,7 +164,7 @@ class MobileAdapter:
         elif method == 'clarify.respond' and translated == 'request.answer':
             self.interactions.pop(public_id, None)
         elif method == 'clarify.respond' and translated == 'clarify.lock':
-            if result.get('status') == 'expired' or result.get('remaining') == 0:
+            if result.get('status') == 'expired' or result.get('remaining') == []:
                 self.interactions.pop(public_id, None)
         if method in {'session.create', 'session.resume'}:
             # Carry replay in the response so the phone first binds the returned
