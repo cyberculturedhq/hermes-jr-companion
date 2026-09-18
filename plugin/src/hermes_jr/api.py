@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from .service import Service, client_session
 from .state import State
 from .updates import public_status
+from .mobile import negotiate
 
 PREFIX = "/api/plugins/hermes-jr"
 router = APIRouter()
@@ -26,6 +27,10 @@ async def handle(state, device_id, method, path, body, query, client):
     device = state.device(device_id)
     if not device or not device["approved"]:
         raise PermissionError("Device is not authorized")
+    if method == "GET" and path == "/v1/mobile/capabilities":
+        if query.get('protocol') not in (1, '1'):
+            raise ValueError('No shared mobile protocol')
+        return negotiate({'protocols': [1], 'known_revision': query.get('known_revision')})
     if method == "GET" and path == "/v1/capabilities":
         return {"notification_encryption": 1, "protocol_version": 1, "relay_enabled": state.get("relay_enabled", False), "push_enabled": state.get("push_enabled", False), "installation_id": state.get("installation_id"), "update": public_status(state)}
     if path == "/v1/follows" and method == "GET":
