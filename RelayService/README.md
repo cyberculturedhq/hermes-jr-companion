@@ -142,7 +142,12 @@ shipping the matching app and companion. Generate it privately with
 `Scripts/create-setup-signing-key.py`; do not reuse APNs or release-signing keys.
 Without this secret, new pairing is unavailable; already-paired devices can still reconnect.
 
-`POST /v1/pairing/intents` creates the ticket and a separate owner credential.
+`POST /v1/pairing/intents` creates the ticket, a separate owner credential, and
+`prompt`, the complete text iOS copies/shares. Edit `src/setup-prompt.ts` and deploy
+the relay to change the wording for new attempts without another iOS release
+(after users have installed the app version that consumes this field). Deploy
+the relay before that app version. Existing pending attempts retain their saved
+text; older clients continue using their bundled wording.
 `GET /v1/pairing/key` exposes only the issuer's public key. Subsequent setup
 requests carry the public ticket in `X-Hermes-Setup` and the appropriate private
 credential in `Authorization`. Hosts need an admitted installation to claim;

@@ -62,6 +62,11 @@ class State:
                 CREATE TABLE IF NOT EXISTS remote_deletions (
                     device_id TEXT PRIMARY KEY, attempts INTEGER NOT NULL DEFAULT 0,
                     next_attempt REAL NOT NULL DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS notification_scope (
+                    device_id TEXT PRIMARY KEY, all_sessions INTEGER NOT NULL DEFAULT 0);
+                CREATE TABLE IF NOT EXISTS notification_presence (
+                    device_id TEXT PRIMARY KEY, profile TEXT NOT NULL, session_id TEXT NOT NULL,
+                    present_until REAL NOT NULL DEFAULT 0);
                 CREATE TABLE IF NOT EXISTS follows (
                     device_id TEXT NOT NULL, profile TEXT NOT NULL, session_id TEXT NOT NULL,
                     present_until REAL NOT NULL DEFAULT 0,
@@ -165,6 +170,8 @@ class State:
         db.execute("DELETE FROM follows WHERE device_id=?", (device_id,))
         db.execute("DELETE FROM automatic_pairing WHERE device_id=?", (device_id,))
         db.execute("DELETE FROM notification_keys WHERE device_id=?", (device_id,))
+        db.execute("DELETE FROM notification_scope WHERE device_id=?", (device_id,))
+        db.execute("DELETE FROM notification_presence WHERE device_id=?", (device_id,))
         db.execute("DELETE FROM notification_details WHERE reference IN (SELECT reference FROM notifications WHERE device_id=?)", (device_id,))
         db.execute("DELETE FROM notifications WHERE device_id=?", (device_id,))
         if changed:
@@ -214,13 +221,27 @@ class State:
             else:
                 db.execute("DELETE FROM follows WHERE device_id=? AND profile=? AND session_id=?", (device_id, profile, session_id))
 
+    def all_session_notifications(self, device_id):
+        with self.connect() as db:
+            row = db.execute("SELECT all_sessions FROM notification_scope WHERE device_id=?", (device_id,)).fetchone()
+            return bool(row and row[0])
+
+    def set_all_session_notifications(self, device_id, enabled):
+        if not self.device(device_id):
+            raise PermissionError("Unknown device")
+        with self.connect() as db:
+            db.execute("INSERT OR REPLACE INTO notification_scope(device_id,all_sessions) VALUES(?,?)", (device_id, int(enabled)))
+
     def presence(self, device_id, profile, session_id, active):
         with self.connect() as db:
+            db.execute("INSERT OR REPLACE INTO notification_presence(device_id,profile,session_id,present_until) VALUES(?,?,?,?)",
+                       (device_id, profile, session_id, time.time() + 45 if active else 0))
             db.execute("UPDATE follows SET present_until=? WHERE device_id=? AND profile=? AND session_id=?",
                        (time.time() + 45 if active else 0, device_id, profile, session_id))
 
     def clear_presence(self, device_id):
         with self.connect() as db:
+            db.execute("DELETE FROM notification_presence WHERE device_id=?", (device_id,))
             db.execute("UPDATE follows SET present_until=0 WHERE device_id=?", (device_id,))
 
     def set_push(self, device_id, enabled):
@@ -250,8 +271,13 @@ class State:
         aliases = tuple(set((session_id, *aliases)))
         with self.connect() as db:
             placeholders = ",".join("?" for _ in aliases)
-            rows = db.execute(f"SELECT DISTINCT f.device_id FROM follows f JOIN devices d ON d.id=f.device_id WHERE f.profile=? AND f.session_id IN ({placeholders}) AND f.present_until<? AND d.revoked=0 AND d.approved=1 AND d.push_enabled=1",
-                              (profile, *aliases, time.time())).fetchall()
+            rows = db.execute(f"""SELECT d.id FROM devices d
+                WHERE d.revoked=0 AND d.approved=1 AND d.push_enabled=1
+                AND (EXISTS (SELECT 1 FROM notification_scope s WHERE s.device_id=d.id AND s.all_sessions=1)
+                     OR EXISTS (SELECT 1 FROM follows f WHERE f.device_id=d.id AND f.profile=? AND f.session_id IN ({placeholders})))
+                AND NOT EXISTS (SELECT 1 FROM notification_presence p WHERE p.device_id=d.id AND p.profile=? AND p.session_id IN ({placeholders}) AND p.present_until>?)
+                AND NOT EXISTS (SELECT 1 FROM follows f WHERE f.device_id=d.id AND f.profile=? AND f.session_id IN ({placeholders}) AND f.present_until>?)""",
+                (profile, *aliases, profile, *aliases, time.time(), profile, *aliases, time.time())).fetchall()
             for row in rows:
                 db.execute("INSERT OR IGNORE INTO notifications(reference,device_id,profile,session_id,kind,event_key,created) VALUES(?,?,?,?,?,?,?)",
                            (token(), row[0], profile, session_id, kind, event_key, time.time()))

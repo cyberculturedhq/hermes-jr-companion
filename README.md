@@ -2,7 +2,7 @@
 
 The Hermes plugin for **Hermes Jr.**, our iPhone app.
 
-Connect to your Hermes agent from your phone and get notified when a conversation you follow finishes or needs your attention. The companion runs in the background on your Hermes computer. **Your conversations and notification details are encrypted before they reach our relay.**
+Connect to your Hermes agent from your phone and get notified when a conversation finishes or needs your attention. The companion runs in the background on your Hermes computer. **Your conversations and notification details are encrypted before they reach our relay.**
 
 ## Connecting an iPhone
 
@@ -34,7 +34,9 @@ For new installations, our service address is **https://hermes-jr-companion.cybe
 ## What it does
 
 - **Connect from anywhere:** encrypted remote access without setting up Tailscale or opening a public port.
-- **Notify you when needed:** updates from conversations you open or follow in Jr.
+- **Notify you when needed:** updates from conversations you open or follow in Jr., with an option to include all sessions.
+- **Send documents:** upload files from your phone for Hermes to use in a conversation.
+- **Continue a terminal conversation:** explicitly close a verified standalone Hermes CLI session and continue it on your phone.
 - **Keep working in the background:** automatic startup and recovery if the companion stops unexpectedly.
 
 Already using Tailscale or a direct connection? You can enable notifications independently of remote access.

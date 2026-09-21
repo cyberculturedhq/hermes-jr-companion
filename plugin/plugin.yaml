@@ -1,5 +1,5 @@
 name: hermes-jr
-version: 0.13.3
+version: 0.14.0
 description: Connect the Hermes Jr. iPhone app to your Hermes agent.
 license: MIT
 provides_hooks:

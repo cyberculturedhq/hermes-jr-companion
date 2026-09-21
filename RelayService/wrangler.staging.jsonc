@@ -22,6 +22,5 @@
     { "name": "INSTALL_RATE_LIMITER", "namespace_id": "71101", "simple": { "limit": 5, "period": 60 } },
     { "name": "REQUEST_RATE_LIMITER", "namespace_id": "71102", "simple": { "limit": 120, "period": 60 } }
   ],
-  "observability": { "enabled": false },
-  "limits": { "cpu_ms": 50 }
+  "observability": { "enabled": false }
 }

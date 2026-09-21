@@ -55,6 +55,10 @@ Worker execution. Do not enable a challenge on normal API traffic: native client
 cannot complete a browser challenge. Existing sockets may need to close; an
 edge block is not a guarantee of instant termination of every open connection.
 
+## Account plan
+
+The hosted configuration omits a custom CPU limit because the current account uses Workers Free. Cloudflare enforces that plan's CPU and request limits; a custom `limits.cpu_ms` requires Workers Standard. Changing the account plan is a separate operator decision. This configuration does not upgrade billing.
+
 ## Spending limits
 
 These are **usage controls, not a guaranteed dollar cap**. Rejected requests,

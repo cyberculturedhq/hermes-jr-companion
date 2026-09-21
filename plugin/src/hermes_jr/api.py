@@ -27,12 +27,25 @@ async def handle(state, device_id, method, path, body, query, client):
     device = state.device(device_id)
     if not device or not device["approved"]:
         raise PermissionError("Device is not authorized")
+    if path == "/v1/uploads" and method == "PUT":
+        from .uploads import upload
+        return upload(state, device_id, body)
+    if path == "/v1/session-handoff" and method in {"GET", "PUT"}:
+        from .handoff import handle as handoff
+        profile, sid = coordinate(query if method == "GET" else body)
+        return await handoff(device_id, profile, sid, body, confirm=method == "PUT")
     if method == "GET" and path == "/v1/mobile/capabilities":
         if query.get('protocol') not in (1, '1'):
             raise ValueError('No shared mobile protocol')
         return negotiate({'protocols': [1], 'known_revision': query.get('known_revision')})
     if method == "GET" and path == "/v1/capabilities":
-        return {"notification_encryption": 1, "protocol_version": 1, "relay_enabled": state.get("relay_enabled", False), "push_enabled": state.get("push_enabled", False), "installation_id": state.get("installation_id"), "update": public_status(state)}
+        return {"file_upload": 1, "notification_scope": 1, "notification_encryption": 1, "protocol_version": 1, "relay_enabled": state.get("relay_enabled", False), "push_enabled": state.get("push_enabled", False), "installation_id": state.get("installation_id"), "update": public_status(state)}
+    if path == "/v1/devices/self/notification-scope" and method in {"GET", "PUT"}:
+        if method == "PUT":
+            if set(body) != {"all_sessions"} or type(body.get("all_sessions")) is not bool:
+                raise ValueError("all_sessions must be a boolean")
+            state.set_all_session_notifications(device_id, body["all_sessions"])
+        return {"all_sessions": state.all_session_notifications(device_id)}
     if path == "/v1/follows" and method == "GET":
         with state.connect() as db:
             rows = db.execute("SELECT profile,session_id FROM follows WHERE device_id=? ORDER BY profile,session_id", (device_id,)).fetchall()
@@ -80,7 +93,7 @@ async def handle(state, device_id, method, path, body, query, client):
 @router.get("/v1/capabilities")
 async def capabilities():
     state = State()
-    return {"notification_encryption": 1, "protocol_version": 1, "relay_enabled": state.get("relay_enabled", False), "push_enabled": state.get("push_enabled", False), "installation_id": state.get("installation_id"), "update": public_status(state)}
+    return {"file_upload": 1, "notification_scope": 1, "notification_encryption": 1, "protocol_version": 1, "relay_enabled": state.get("relay_enabled", False), "push_enabled": state.get("push_enabled", False), "installation_id": state.get("installation_id"), "update": public_status(state)}
 
 
 @router.post("/v1/enroll")
@@ -113,7 +126,7 @@ async def endpoint(rest: str, request: Request):
         device_id = request.headers.get("x-hermes-jr-device", "")
         state.authenticate(device_id, request.headers.get("x-hermes-jr-token", ""))
         raw = await request.body()
-        if len(raw) > 4096:
+        if len(raw) > (720_000 if rest == "uploads" else 4096):
             raise HTTPException(413, "Request too large")
         body = await request.json() if raw else {}
         if not isinstance(body, dict):
