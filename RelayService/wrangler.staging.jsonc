@@ -7,8 +7,8 @@
   "workers_dev": false,
   "routes": [{ "pattern": "hermes-jr-companion.cybercultured.com", "custom_domain": true }],
   "preview_urls": false,
-  "vars": { "RELAY_ENABLED": "true", "REGISTRATIONS_ENABLED": "true", "APNS_ENVIRONMENT": "sandbox" },
-  "secrets": { "required": ["APNS_TEAM_ID", "APNS_KEY_ID", "APNS_TOPIC", "APNS_PRIVATE_KEY", "OPERATOR_TOKEN", "SETUP_TICKET_PRIVATE_KEY"] },
+  "vars": { "RELAY_ENABLED": "true", "REGISTRATIONS_ENABLED": "true", "APNS_ENVIRONMENT": "both" },
+  "secrets": { "required": ["APNS_TEAM_ID", "APNS_KEY_ID", "APNS_TOPIC", "APNS_PRIVATE_KEY", "APNS_PRODUCTION_KEY_ID", "APNS_PRODUCTION_PRIVATE_KEY", "OPERATOR_TOKEN", "SETUP_TICKET_PRIVATE_KEY"] },
   "durable_objects": {
     "bindings": [
       { "name": "INSTALLATIONS", "class_name": "InstallationRelay" },

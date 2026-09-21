@@ -57,7 +57,9 @@ def rpc(method, params):
     return result
 
 profiles = rpc('profiles.list', {'include_sessions': False})
-assert isinstance(profiles.get('profiles'), list)
+assert isinstance(profiles.get('profiles'), list) and profiles['profiles']
+assert all(isinstance(item, dict) and isinstance(item.get('name'), str) and item['name']
+           for item in profiles['profiles']), 'Profile identities required by iOS are missing'
 completion = rpc('complete.slash', {'text': '/', 'profile': 'default', 'session_id': 'unused'})
 assert isinstance(completion.get('items'), list), completion
 # Real session state/response, with the model-construction boundary disabled.

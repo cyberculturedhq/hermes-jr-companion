@@ -60,6 +60,10 @@ contracts validate representative writes without executing them. Modern
 approval and clarification replies exercise Hermes's real request registry.
 Companion tests cover both interaction generations and invalid/stale answers.
 
+The mandatory runtime check uses Hermes's production result-schema policy (log internal drift), while still requiring the mobile response fields and validating request parameters. A second check enables Hermes's stricter test-only result policy and emits a visible workflow warning and summary if upstream's own schemas disagree with its handlers. This diagnostic does not block a release when the real mobile API passes; no isolation, network guard, or mobile assertion is disabled.
+
+On 21 September 2026, upstream commit `a1b1817adf2285ee2c9a5acca770f35b73bd1d43` passed production API checks but its strict `profiles.list` result rejected the additional `previous_names` field. The companion needs no translation for this additive field, and iOS retains its required profile identities. This remains an upstream schema diagnostic, not a claim that strict upstream tests passed.
+
 This is not an exhaustive guarantee: actual model execution, all tools,
 provider integrations, and every REST response are not exercised by the daily
 upstream probe. The local encrypted integration test separately runs the real
