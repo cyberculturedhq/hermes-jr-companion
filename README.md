@@ -41,7 +41,7 @@ For new installations, our service address is **https://hermes-jr-companion.cybe
 
 Already using Tailscale or a direct connection? You can enable notifications independently of remote access.
 
-Your Hermes computer needs to be awake, with its Hermes dashboard running. The app and companion are currently in development; the hosted notification service supports iOS development builds.
+Your Hermes computer needs to be awake, with its Hermes dashboard running. The app and companion are currently in development. The hosted notification service is configured for development builds and the maintainer's internal TestFlight builds.
 
 ## Make it your own
 
