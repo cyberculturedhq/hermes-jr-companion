@@ -58,6 +58,9 @@ jobs:
         run: python -m pip install -e './upstream[web]'
       - name: Check real Hermes API with mobile adapter
         working-directory: upstream
+        run: python ../tools/compatibility/check.py --production-contracts
+      - name: Check upstream strict internal contracts
+        working-directory: upstream
         run: python ../tools/compatibility/check.py
       - name: Explain failure
         if: failure()

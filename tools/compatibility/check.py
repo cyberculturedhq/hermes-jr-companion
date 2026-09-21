@@ -3,6 +3,7 @@
 Run from the Hermes checkout with its dependencies installed. No model calls:
 agent construction is disabled and outbound socket connections are denied.
 """
+import argparse
 import itertools
 import json
 import os
@@ -11,6 +12,11 @@ import socket
 import sys
 import tempfile
 from unittest.mock import patch
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--production-contracts', action='store_true',
+                    help='Use Hermes production warning behavior for its own result contracts')
+args = parser.parse_args()
 
 root = Path.cwd()
 assert (root / 'tui_gateway/server.py').is_file(), 'Run from a Hermes checkout'
@@ -26,6 +32,18 @@ socket.create_connection = denied
 sys.path.insert(0, str(root))
 from hermes_jr.mobile import MobileAdapter, PREFIX
 from tui_gateway import server
+
+if args.production_contracts:
+    try:
+        from tui_gateway.contracts import registry as upstream_contracts
+    except ImportError:
+        pass
+    else:
+        # Keep home/network/model isolation. Only upstream's own result-schema
+        # policy changes: production logs drift instead of raising. Our mobile
+        # shape assertions and upstream request validation remain mandatory.
+        upstream_contracts.STRICT = False
+        print('INFO: exercising production result-contract behavior; drift remains visible in warnings')
 
 adapter = MobileAdapter()
 ids = itertools.count()
