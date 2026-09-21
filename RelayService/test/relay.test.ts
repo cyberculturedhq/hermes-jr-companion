@@ -2,7 +2,7 @@ import { env, exports } from "cloudflare:workers";
 import { abortAllDurableObjects, evictDurableObject, reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
-import { sendPush } from "../src/apns";
+import { pushAvailable, pushEnvironmentAllowed, sendPush } from "../src/apns";
 import { LIMITS, newToken, routedRecord, tokenHash } from "../src/protocol";
 
 type Installation = { installation_id: string; host_token: string };
@@ -262,6 +262,44 @@ describe("opaque WebSocket forwarding", () => {
 });
 
 describe("generic APNs notifications", () => {
+  it("uses distinct signing keys and durable caches for sandbox and production", async () => {
+    const sent: { url: string; jwt: string }[] = [];
+    vi.mocked(fetch).mockImplementation(async (input, init) => {
+      sent.push({ url: String(input), jwt: new Headers(init?.headers).get("authorization")!.slice(7) });
+      return new Response(null, { status: 200 });
+    });
+    expect((await sendPush(env, "a".repeat(64), "sandbox", newToken())).status).toBe("accepted");
+    expect((await sendPush(env, "b".repeat(64), "production", newToken())).status).toBe("accepted");
+    const productionStub = env.APNS_AUTH.getByName(`${env.APNS_TEAM_ID}:${env.APNS_PRODUCTION_KEY_ID}`);
+    await evictDurableObject(productionStub);
+    expect((await sendPush(env, "b".repeat(64), "production", newToken())).status).toBe("accepted");
+    const decode = (value: string) => Uint8Array.from(atob(value.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+    expect(JSON.parse(new TextDecoder().decode(decode(sent[0].jwt.split(".")[0]))).kid).toBe("TESTKEY001");
+    const [header, claims, signature] = sent[1].jwt.split(".");
+    expect(JSON.parse(new TextDecoder().decode(decode(header))).kid).toBe("PRODKEY001");
+    expect(sent[1].url).toBe(`https://api.push.apple.com/3/device/${"b".repeat(64)}`);
+    expect(sent[1].jwt).toBe(sent[2].jwt);
+    expect(sent[1].jwt).not.toBe(sent[0].jwt);
+    const jwk = JSON.parse((env as Env & { TEST_PRODUCTION_PUBLIC_KEY: string }).TEST_PRODUCTION_PUBLIC_KEY);
+    const publicKey = await crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
+    expect(await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, publicKey, decode(signature), new TextEncoder().encode(`${header}.${claims}`))).toBe(true);
+    const concurrent = await Promise.all(Array.from({ length: 8 }, () => productionStub.getToken("production")));
+    expect(new Set(concurrent)).toEqual(new Set([sent[1].jwt]));
+    // Even an internal caller selecting both environments on one object stays isolated.
+    expect(await productionStub.getToken("sandbox")).not.toBe(sent[1].jwt);
+  });
+
+  it("fails closed on incomplete production overrides and retains legacy shared-key support", async () => {
+    const incomplete = { ...env, APNS_PRODUCTION_PRIVATE_KEY: undefined };
+    expect(pushEnvironmentAllowed(incomplete, "production")).toBe(false);
+    expect(pushEnvironmentAllowed(incomplete, "sandbox")).toBe(true);
+    expect(pushAvailable(incomplete)).toBe(true);
+    expect((await sendPush(incomplete, "a".repeat(64), "production", newToken())).status).toBe("unavailable");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(pushEnvironmentAllowed({ ...env, APNS_PRODUCTION_KEY_ID: undefined, APNS_PRODUCTION_PRIVATE_KEY: undefined }, "production")).toBe(true);
+    expect(pushEnvironmentAllowed({ ...env, APNS_ENVIRONMENT: "sandbox" }, "production")).toBe(false);
+  });
+
   it("constructs runtime-valid provider requests and refuses to forward redirects", async () => {
     let redirectMode: string | undefined;
     vi.mocked(fetch).mockImplementation(async (input, init) => {
@@ -343,7 +381,7 @@ describe("generic APNs notifications", () => {
   });
 
   it("reports missing APNs configuration without enabling a partial integration", async () => {
-    const response = await worker.fetch(new Request("https://relay.test/v1/capabilities"), { ...env, APNS_PRIVATE_KEY: "" });
+    const response = await worker.fetch(new Request("https://relay.test/v1/capabilities"), { ...env, APNS_PRIVATE_KEY: "", APNS_PRODUCTION_PRIVATE_KEY: "" });
     expect(await response.json()).toMatchObject({ protocol_version: 1, push: false });
     const unavailableLimiter = await worker.fetch(new Request("https://relay.test/v1/installations", { method: "POST" }), { ...env, INSTALL_RATE_LIMITER: undefined } as unknown as Env);
     expect(unavailableLimiter.status).toBe(503);

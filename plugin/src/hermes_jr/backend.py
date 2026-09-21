@@ -11,7 +11,7 @@ import subprocess
 import sys
 from urllib.parse import urlsplit
 from .gateway import dashboard_url
-from .supervisor import unit_quote
+from .supervisor import private_write, unit_quote, unit_working_directory
 
 
 class BackendSupervisor:
@@ -62,7 +62,7 @@ class BackendSupervisor:
         except OSError:
             return False
 
-    def definition(self, executable=None):
+    def definition(self, executable=None, *, legacy_workdir=False):
         # Preserve the venv path rather than resolving it to the base interpreter.
         args = [os.path.abspath(executable or sys.executable), '-m', 'hermes_cli.main', 'serve',
                 '--host', '127.0.0.1', '--port', str(self.port)]
@@ -75,7 +75,7 @@ class BackendSupervisor:
         return ('[Unit]\nDescription=Hermes Jr loopback backend\nStartLimitIntervalSec=0\n\n'
                 '[Service]\nType=simple\nExecStart=' + ' '.join(unit_quote(x) for x in args)
                 + '\nEnvironment=' + unit_quote('HERMES_HOME=' + str(self.hermes_home), command=False)
-                + '\nWorkingDirectory=' + unit_quote(self.hermes_home, command=False)
+                + '\nWorkingDirectory=' + (unit_quote(self.hermes_home, command=False) if legacy_workdir else unit_working_directory(self.hermes_home))
                 + '\nRestart=always\nRestartSec=10\nUMask=0077\nStandardOutput=null\nStandardError=null\n\n'
                 '[Install]\nWantedBy=default.target\n').encode()
 
@@ -85,14 +85,14 @@ class BackendSupervisor:
         if not self.path.exists():
             return True
         actual = self.path.read_bytes()
-        if actual == self.definition():
+        if actual in (self.definition(), self.definition(legacy_workdir=True)):
             return True
         # Python aliases in one venv retain that venv; resolving to the base
         # interpreter would lose it. Accept only an otherwise identical file.
         executable = Path(os.path.abspath(sys.executable))
         for alias in executable.parent.glob('python*'):
             try:
-                if alias.is_file() and (alias.samefile(executable) or filecmp.cmp(alias, executable, shallow=False)) and actual == self.definition(alias):
+                if alias.is_file() and (alias.samefile(executable) or filecmp.cmp(alias, executable, shallow=False)) and actual in (self.definition(alias), self.definition(alias, legacy_workdir=True)):
                     return True
             except OSError:
                 continue
@@ -116,6 +116,12 @@ class BackendSupervisor:
             fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, 'wb') as stream:
                 stream.write(definition)
+        elif self.path.read_bytes() != definition:
+            # owns_definition accepted only our exact legacy definition (including
+            # a same-environment Python alias). Repair its invalid scalar quoting.
+            if not self.owns_definition():
+                raise ValueError('The backend definition changed; it was not overwritten.')
+            private_write(self.path, definition)
         if self.platform == 'darwin':
             self.command(['launchctl', 'enable', f'{self.domain}/{self.label}'])
             self.command(['launchctl', 'bootstrap', self.domain, str(self.path)])

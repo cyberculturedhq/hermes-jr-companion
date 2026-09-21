@@ -158,3 +158,7 @@ bounded initial rollout; App Attest is not yet implemented.
 
 Read `Protocol/SETUP.md` for the complete construction, API roles, lifecycle,
 limitations, signing-key rotation behavior, and validation.
+
+### Separate APNs environment keys
+
+`APNS_KEY_ID` and `APNS_PRIVATE_KEY` remain the base credentials (sandbox on the hosted service). To use a separate production-only, topic-specific Apple key, set both optional secrets `APNS_PRODUCTION_KEY_ID` and `APNS_PRODUCTION_PRIVATE_KEY`, then set `APNS_ENVIRONMENT` to `both`. The production key must allow `APNS_TOPIC` and belong to `APNS_TEAM_ID`. A partial production override fails closed; it never falls back to the sandbox key. Without either override, existing self-hosted dual-environment keys retain their current behavior. Provider tokens are cached separately by signing key, including across Durable Object restarts.

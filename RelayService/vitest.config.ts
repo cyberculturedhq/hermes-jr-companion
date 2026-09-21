@@ -5,6 +5,7 @@ import { defineConfig } from "vitest/config";
 // Ephemeral local test key. This is never an Apple credential or written to disk.
 const setupKey = generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "der" }).toString("base64url");
 const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+const production = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
 
 export default defineConfig({
   plugins: [cloudflareTest({
@@ -16,6 +17,9 @@ export default defineConfig({
         APNS_KEY_ID: "TESTKEY001",
         APNS_TOPIC: "test.hermes.jr",
         APNS_PRIVATE_KEY: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+        APNS_PRODUCTION_KEY_ID: "PRODKEY001",
+        APNS_PRODUCTION_PRIVATE_KEY: production.privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
+        TEST_PRODUCTION_PUBLIC_KEY: JSON.stringify(production.publicKey.export({ format: "jwk" })),
       },
     },
   })],

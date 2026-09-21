@@ -48,6 +48,15 @@ def unit_quote(value, *, command=True):
     return '"' + (value.replace('$', '$$') if command else value) + '"'
 
 
+def unit_working_directory(value):
+    # WorkingDirectory is a scalar path, not an ExecStart/Environment word list:
+    # systemd treats surrounding quotes literally. Only specifiers need escaping.
+    value = str(value)
+    if not value.startswith('/') or value != value.rstrip() or any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise ValueError('The systemd working directory must be an absolute path without control characters or trailing whitespace.')
+    return value.replace('%', '%%')
+
+
 class Supervisor:
     def __init__(self, state, *, home=None, platform=None):
         self.state = state
@@ -83,7 +92,7 @@ class Supervisor:
                                   'StandardOutPath': '/dev/null', 'StandardErrorPath': '/dev/null'})
         return ('[Unit]\nDescription=Hermes Jr companion\nStartLimitIntervalSec=0\n\n[Service]\nType=simple\n'
                 + 'ExecStart=' + ' '.join(unit_quote(x) for x in args) + '\n'
-                + 'WorkingDirectory=' + unit_quote(self.directory, command=False) + '\n'
+                + 'WorkingDirectory=' + unit_working_directory(self.directory) + '\n'
                 + 'Restart=always\nRestartSec=10\nTimeoutStopSec=20\nUMask=0077\n'
                 + 'StandardOutput=null\nStandardError=null\n\n[Install]\nWantedBy=default.target\n').encode()
 

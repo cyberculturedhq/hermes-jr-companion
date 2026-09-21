@@ -93,6 +93,20 @@ class BackendTests(unittest.TestCase):
         self.assertIn('WantedBy=default.target', text)
         self.assertNotIn('/bin/sh', text)
 
+    @patch('hermes_jr.backend.importlib.util.find_spec', return_value=object())
+    def test_repairs_only_exact_legacy_systemd_definition(self, spec):
+        manager = self.manager('linux')
+        manager.path.parent.mkdir(parents=True)
+        legacy = manager.definition(legacy_workdir=True)
+        manager.path.write_bytes(legacy)
+        with patch.object(manager, 'active', return_value=False), patch.object(manager, 'listening', return_value=False), patch.object(manager, 'command'):
+            manager.install()
+        self.assertEqual(manager.path.read_bytes(), manager.definition())
+        manager.path.write_bytes(legacy + b'Environment=OWNER_SETTING=1\n')
+        with self.assertRaisesRegex(ValueError, 'not overwritten'):
+            manager.install()
+        self.assertEqual(manager.path.read_bytes(), legacy + b'Environment=OWNER_SETTING=1\n')
+
     def test_uninstall_only_removes_its_own_service(self):
         manager = self.manager()
         manager.path.parent.mkdir(parents=True)
