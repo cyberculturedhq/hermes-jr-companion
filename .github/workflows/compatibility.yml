@@ -1,0 +1,75 @@
+name: Hermes compatibility
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths: ['plugin/**', 'tests/**', 'tools/compatibility/**', '.github/workflows/compatibility.yml']
+  push:
+    branches: [main]
+    paths: ['plugin/**', 'tests/**', 'tools/compatibility/**', '.github/workflows/compatibility.yml']
+permissions:
+  contents: read
+concurrency:
+  group: compatibility-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  upstream:
+    name: Hermes / ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [legacy-v6, known-v7, latest-release, upstream-main]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - name: Resolve Hermes revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          case "$TARGET" in
+            legacy-v6) ref=2ff55bc89515d02fa5407d73311cd4019c5de15d ;;
+            known-v7) ref=784d5c3f9c2cb77698d8a9d2e72b1d106a38ea88 ;;
+            latest-release) ref=$(gh api repos/NousResearch/hermes-agent/releases/latest --jq .tag_name) ;;
+            upstream-main) ref=main ;;
+          esac
+          sha=$(gh api "repos/NousResearch/hermes-agent/commits/$ref" --jq .sha)
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+          echo "HERMES_SHA=$sha" >> "$GITHUB_ENV"
+          echo "### $TARGET: $ref ($sha)" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$sha" > hermes-revision.txt
+      - name: Download isolated upstream source
+        run: |
+          mkdir upstream
+          curl --fail --location --retry 3 "https://codeload.github.com/NousResearch/hermes-agent/tar.gz/$HERMES_SHA" | tar -xz --strip-components=1 -C upstream
+      - name: Install companion dependencies
+        run: python -m pip install ./plugin
+      - name: Companion regression tests (standalone fixture environment)
+        run: python -m unittest discover -s tests -v
+      - name: Install Hermes dependencies (no provider credentials)
+        run: python -m pip install -e './upstream[web]'
+      - name: Check real Hermes API with mobile adapter
+        working-directory: upstream
+        run: python ../tools/compatibility/check.py --production-contracts
+      - name: Check upstream strict internal contracts
+        id: strict_contracts
+        continue-on-error: true
+        working-directory: upstream
+        run: python ../tools/compatibility/check.py
+      - name: Report upstream internal contract drift
+        if: steps.strict_contracts.outcome == 'failure'
+        run: |
+          echo '::warning::Hermes production API checks passed, but its strict internal result schemas failed. Inspect the strict-contract step; this is a separate upstream diagnostic, not a mobile API pass.'
+          echo 'Upstream contract diagnostic failed. The mandatory production API check passed. The additional strict internal Hermes schema check failed; inspect its log for the exact upstream revision and discrepancy. No product behavior or test isolation was changed.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Explain failure
+        if: failure()
+        run: |
+          echo 'Compatibility check failed. Inspect the failed step: dependency/setup failures are distinct from API incompatibility. Ask Codex to investigate this run and preserve support for every matrix version. No repair or deployment was attempted.' >> "$GITHUB_STEP_SUMMARY"

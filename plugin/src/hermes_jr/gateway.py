@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 import aiohttp
 from .api import PREFIX, handle
 from .service import read_bounded
+from .mobile import MobileAdapter, PREFIX as MOBILE_PREFIX
 
 RPC_METHODS = frozenset({
     "gateway.ping", "profiles.list", "profiles.get_asset", "session.create", "session.resume",
@@ -29,16 +30,22 @@ def dashboard_url(value):
 
 
 def validate_rpc(frame):
-    if not isinstance(frame, dict) or frame.get("jsonrpc") != "2.0" or frame.get("method") not in RPC_METHODS:
+    if not isinstance(frame, dict) or frame.get("jsonrpc") != "2.0":
+        raise ValueError("RPC operation is not allowed")
+    name = frame.get('method', '')
+    if not isinstance(name, str):
+        raise ValueError("RPC operation is not allowed")
+    name = name.removeprefix(MOBILE_PREFIX)
+    if name not in RPC_METHODS:
         raise ValueError("RPC operation is not allowed")
     params = frame.get("params", {})
     if not isinstance(params, dict):
         raise ValueError("RPC parameters must be an object")
-    if frame["method"] == "config.get" and params.get("key") not in {"profile", "model", "reasoning", "provider", "reasoning_effort"}:
+    if name == "config.get" and params.get("key") not in {"profile", "model", "reasoning", "provider", "reasoning_effort"}:
         raise ValueError("Configuration key is not allowed")
-    if frame["method"] == "config.set" and params.get("key") not in {"model", "reasoning"}:
+    if name == "config.set" and params.get("key") not in {"model", "reasoning"}:
         raise ValueError("Configuration key is not allowed")
-    if frame["method"] == "session.create":
+    if name == "session.create":
         params = {**params, "close_on_disconnect": False}
     return {**frame, "params": params}
 
@@ -111,6 +118,12 @@ class Gateway:
         query, body = envelope.get("query", {}), envelope.get("body", {})
         if not isinstance(path, str) or not isinstance(query, dict) or not isinstance(body, dict):
             raise ValueError("Invalid HTTP operation")
+        mobile_path = PREFIX + '/v1/mobile/api/'
+        if path.startswith(mobile_path):
+            device = self.state.device(device_id)
+            if not device or not device['approved']:
+                raise PermissionError('Device is not authorized')
+            path = '/api/' + path[len(mobile_path):]
         if path.startswith(PREFIX + "/"):
             result = await handle(self.state, device_id, method, path[len(PREFIX):], body, query, self.client)
             return 200, result
@@ -133,22 +146,41 @@ class LocalPeer:
         self.ws = None
         self.reader = None
         self.lock = asyncio.Lock()
+        self.adapter = MobileAdapter()
+        self.mobile = False
 
     async def send(self, frame):
         frame = validate_rpc(frame)
         async with self.lock:
             if self.ws is None or self.ws.closed:
+                self.adapter = MobileAdapter()
                 self.ws = await self.gateway.socket()
                 self.reader = asyncio.create_task(self.read(), name="hermes-jr-local-reader")
+            if frame['method'].startswith(MOBILE_PREFIX):
+                self.mobile = True
+                try:
+                    frame = self.adapter.request(frame)
+                except ValueError as exc:
+                    await self.emit({'type': 'rpc', 'body': {'jsonrpc': '2.0', 'id': frame.get('id'),
+                                    'error': {'code': -32602, 'message': str(exc)}}})
+                    return
             await self.ws.send_json(frame)
 
     async def read(self):
+        socket = self.ws
         try:
-            async for message in self.ws:
+            async for message in socket:
                 if message.type == aiohttp.WSMsgType.TEXT:
-                    await self.emit({"type": "rpc", "body": json.loads(message.data)})
+                    frame = json.loads(message.data)
+                    if self.mobile:
+                        frame = self.adapter.incoming(frame)
+                    await self.emit({"type": "rpc", "body": frame})
         except (aiohttp.ClientError, ValueError, ConnectionError):
             pass
+        finally:
+            if self.mobile and socket is self.ws:
+                await self.emit({'type': 'rpc', 'body': {'jsonrpc': '2.0', 'method': 'jr.backend.disconnected'}})
+            await socket.close()
 
     async def close(self):
         if self.ws:

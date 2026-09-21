@@ -117,7 +117,7 @@ class Peer:
             except (aiohttp.ClientError, TimeoutError):
                 pass
             await self.emit({"type": "http", "id": envelope.get("id"), "status": status, "body": body})
-            if envelope.get("path") == "/api/profiles" and status == 200 and isinstance(body, dict) and isinstance(body.get("profiles"), list):
+            if envelope.get("path") in {"/api/profiles", "/api/plugins/hermes-jr/v1/mobile/api/profiles"} and status == 200 and isinstance(body, dict) and isinstance(body.get("profiles"), list):
                 self.bridge.state.set("setup-ready/" + self.device_id, True)
         else:
             raise ValueError("Unknown application envelope")

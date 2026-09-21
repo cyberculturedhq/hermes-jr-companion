@@ -47,20 +47,29 @@ async function appleReason(response: Response): Promise<APNsReason | null> {
 }
 
 export function pushAvailable(env: Env): boolean {
-  return Boolean(env.APNS_TEAM_ID && env.APNS_KEY_ID && env.APNS_TOPIC && env.APNS_PRIVATE_KEY
-    && ["both", "sandbox", "production"].includes(env.APNS_ENVIRONMENT));
+  return (["sandbox", "production"] as const).some((environment) => pushEnvironmentAllowed(env, environment));
 }
 
 export function pushEnvironmentAllowed(env: Env, environment: PushEnvironment): boolean {
-  return env.APNS_ENVIRONMENT === "both" || env.APNS_ENVIRONMENT === environment;
+  return Boolean(env.APNS_TEAM_ID && env.APNS_TOPIC && signingKey(env, environment)
+    && (env.APNS_ENVIRONMENT === "both" || env.APNS_ENVIRONMENT === environment));
 }
 
-async function providerToken(env: Env): Promise<string> {
+function signingKey(env: Env, environment: PushEnvironment): { id: string; pem: string } | null {
+  // A partial production override fails closed, never falls back to a sandbox key.
+  const dedicated = environment === "production"
+    && Boolean(env.APNS_PRODUCTION_KEY_ID || env.APNS_PRODUCTION_PRIVATE_KEY);
+  const id = dedicated ? env.APNS_PRODUCTION_KEY_ID : env.APNS_KEY_ID;
+  const pem = dedicated ? env.APNS_PRODUCTION_PRIVATE_KEY : env.APNS_PRIVATE_KEY;
+  return id && pem ? { id, pem } : null;
+}
+
+async function providerToken(env: Env, signing: { id: string; pem: string }): Promise<string> {
   const encode = (value: unknown) => base64url(new TextEncoder().encode(JSON.stringify(value)));
-  const header = encode({ alg: "ES256", kid: env.APNS_KEY_ID });
+  const header = encode({ alg: "ES256", kid: signing.id });
   const claims = encode({ iss: env.APNS_TEAM_ID, iat: Math.floor(Date.now() / 1000) });
   const unsigned = `${header}.${claims}`;
-  const pem = env.APNS_PRIVATE_KEY.replace(/\\n/g, "\n").replace(/-----[A-Z ]+-----/g, "").replace(/\s/g, "");
+  const pem = signing.pem.replace(/\\n/g, "\n").replace(/-----[A-Z ]+-----/g, "").replace(/\s/g, "");
   const der = Uint8Array.from(atob(pem), (character) => character.charCodeAt(0));
   const key = await crypto.subtle.importKey("pkcs8", der, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
   const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(unsigned));
@@ -71,20 +80,28 @@ async function providerToken(env: Env): Promise<string> {
  * a 30-minute provider JWT across installations and preserves it through hibernation.
  * Only the derived, expiring token is stored; the .p8 signing key stays in env secrets. */
 export class APNsProviderToken extends DurableObject<Env> {
-  private refreshing?: Promise<string>;
+  private refreshing = new Map<string, Promise<string>>();
 
-  async getToken(): Promise<string> {
-    if (this.refreshing) return this.refreshing;
+  async getToken(environment: PushEnvironment = "sandbox"): Promise<string> {
+    if (environment !== "sandbox" && environment !== "production") throw new Error("Invalid push environment");
+    const signing = signingKey(this.env, environment);
+    if (!signing || !pushEnvironmentAllowed(this.env, environment)) throw new Error("Push signing unavailable");
+    // Preserve the existing base-key cache during rollout. Even if an internal
+    // caller reuses the object for both keys, their cached JWTs cannot collide.
+    const key = signing.id === this.env.APNS_KEY_ID ? "token" : `token:${signing.id}`;
+    const pending = this.refreshing.get(key);
+    if (pending) return pending;
     const refresh = async () => {
-      const cached = await this.ctx.storage.get<{ jwt: string; refreshAt: number }>("token");
+      const cached = await this.ctx.storage.get<{ jwt: string; refreshAt: number }>(key);
       if (cached && cached.refreshAt > Date.now()) return cached.jwt;
-      const jwt = await providerToken(this.env);
-      await this.ctx.storage.put("token", { jwt, refreshAt: Date.now() + 30 * 60_000 });
+      const jwt = await providerToken(this.env, signing);
+      await this.ctx.storage.put(key, { jwt, refreshAt: Date.now() + 30 * 60_000 });
       return jwt;
     };
-    this.refreshing = refresh();
-    try { return await this.refreshing; }
-    finally { this.refreshing = undefined; }
+    const request = refresh();
+    this.refreshing.set(key, request);
+    try { return await request; }
+    finally { this.refreshing.delete(key); }
   }
 }
 
@@ -103,7 +120,8 @@ async function deliverPush(env: Env, token: string, environment: PushEnvironment
   }
   let jwt: string;
   try {
-    jwt = await env.APNS_AUTH.getByName(`${env.APNS_TEAM_ID}:${env.APNS_KEY_ID}`).getToken();
+    const signing = signingKey(env, environment)!;
+    jwt = await env.APNS_AUTH.getByName(`${env.APNS_TEAM_ID}:${signing.id}`).getToken(environment);
   } catch { return { status: "failed", stage: "signing", apns_status: null, reason: null }; }
   let response: Response;
   try {

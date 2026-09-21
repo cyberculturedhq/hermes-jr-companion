@@ -46,11 +46,17 @@ hermes jr setup --service https://your-relay.example --push
 
 Omitting `--relay` preserves its current value. Use `--no-relay` or `--no-push` to explicitly disable either feature. For a Tailscale-only user, initial setup with `--push` leaves remote access disabled. The bridge still runs to deliver the notification outbox. The iOS app registers its APNs token through the dashboard plugin API; host setup never asks users for Apple signing credentials.
 
-Only opened/followed conversations notify. The plugin queues completion, failure, human approval, and `clarify` tool events from durable session/profile identities. It excludes interrupted cleanup and smart auto-approval events, deduplicates each event, follows compression ancestry when Hermes exposes it, and suppresses alerts during a 45-second foreground presence lease renewed by the phone. Notification details are encrypted for the phone, with a generic fallback and random reference; opening one fetches its local profile/session mapping after authentication. References expire after seven days. Failed service delivery retries from the private SQLite outbox.
+Opened/followed conversations notify by default. Each phone can opt into notifications from all sessions in profiles where the plugin is enabled. The plugin queues completion, failure, human approval, and `clarify` tool events from durable session/profile identities. It excludes interrupted cleanup and smart auto-approval events, deduplicates each event, follows compression ancestry when Hermes exposes it, and suppresses alerts during a 45-second foreground presence lease renewed by the phone, including when the active session is not followed. Notification details are encrypted for the phone, with a generic fallback and random reference; opening one fetches its local profile/session mapping after authentication. References expire after seven days. Failed service delivery retries from the private SQLite outbox.
 
 Hermes exposes no dedicated clarification-request observer, so this version observes `pre_tool_call` for `clarify`. If another policy subsequently blocks the tool, the attempted clarification can still trigger an alert. Hooks never transmit question/command/prompt text. Hook delivery follows the profiles where this plugin is enabled; older Hermes builds may omit correlation fields, in which case the plugin safely skips the event.
 
 Remote phone disconnects discard their cryptographic contexts while preserving the companion's local Hermes WebSocket. Reconnection reads durable history instead of an unlimited in-memory event backlog. Direct clients continue to use `close_on_disconnect=false`; Hermes decides whether inactive detached work is healthy enough to continue. The companion does not resume every historical followed conversation just to keep it alive.
+
+## Documents and CLI handoff
+
+Document uploads are limited to 25 MiB per file and 512 KiB per chunk. The host chooses a private path under `uploads/<device hash>/<upload UUID>/`; filenames cannot select another directory. Each chunk must match the current offset. An uncertain upload acknowledgement must not be retried automatically. Completed and partial files remain in private companion state; there is no automatic retention cleanup yet.
+
+Session handoff first inspects the native Hermes ownership registry. It offers a short-lived, single-use ticket only for a verified standalone CLI owned by the current OS user. Confirmation rechecks the exact process identity, session, and profile before requesting graceful termination. Shared servers and unrelated processes are rejected. An uncertain or failed shutdown requires checking the current session again; handoff never force-kills the process or deletes its ownership record.
 
 ## Configuration and private state
 
@@ -70,6 +76,10 @@ Routes mount at `/api/plugins/hermes-jr`; Hermes' normal dashboard authenticatio
 | Follow | `PUT /v1/follows {profile,session_id}` |
 | Unfollow | `DELETE /v1/follows?profile=…&session_id=…` |
 | List follows | `GET /v1/follows` → `{follows:[{profile,session_id}]}` |
+| Notification scope | `GET` or `PUT /v1/devices/self/notification-scope` → `{all_sessions:boolean}` |
+| Upload document chunk | `PUT /v1/uploads {upload_id,filename,offset,total,content_base64}` → `{offset,complete,path}` |
+| Preview CLI handoff | `GET /v1/session-handoff?profile=…&session_id=…` → `{ready,ticket?,error?}` |
+| Confirm CLI handoff | `PUT /v1/session-handoff {profile,session_id,ticket,confirm_close_cli:true}` |
 | Foreground presence | `PUT /v1/presence {profile,session_id,active}` |
 | Register Apple token | `PUT /v1/devices/self/push {apns_token,environment:"sandbox"|"production"}` |
 | Disable Apple token | `DELETE /v1/devices/self/push` |

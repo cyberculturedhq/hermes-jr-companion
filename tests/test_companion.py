@@ -76,6 +76,42 @@ class RegistryTests(unittest.TestCase):
         self.state.enqueue("default", "s1", "approval", "turn-3")
         self.assertEqual(len(self.state.outbox()), 2)
 
+    def test_all_sessions_scope_and_return_to_followed(self):
+        self.state.set("push_enabled", True)
+        for device in (self.a, self.b):
+            self.state.set_push(device, True)
+        self.assertFalse(self.state.all_session_notifications(self.a))
+        self.state.follow(self.a, "default", "jr")
+        self.state.set_all_session_notifications(self.a, True)
+        self.state.enqueue("other", "cli", "completed", "cli-1")
+        self.state.enqueue("default", "jr", "completed", "jr-1")
+        self.state.enqueue("default", "jr", "completed", "jr-1")
+        self.assertEqual([e["device_id"] for e in self.state.outbox()], [self.a, self.a])
+        self.state.set_all_session_notifications(self.a, False)
+        self.state.enqueue("other", "cli", "completed", "cli-2")
+        self.state.enqueue("default", "jr", "completed", "jr-2")
+        self.assertEqual(len(self.state.outbox()), 3)
+
+    def test_all_sessions_presence_and_push_controls(self):
+        self.state.set("push_enabled", True)
+        self.state.set_push(self.a, True)
+        self.state.set_all_session_notifications(self.a, True)
+        self.state.presence(self.a, "other", "cli", True)
+        self.state.enqueue("other", "child", "completed", "present", aliases=["cli"])
+        self.assertEqual(self.state.outbox(), [])
+        self.state.clear_presence(self.a)
+        self.state.enqueue("other", "cli", "completed", "away")
+        self.assertEqual(len(self.state.outbox()), 1)
+        self.state.set_push(self.a, False)
+        self.state.enqueue("other", "cli", "completed", "disabled")
+        self.state.set_push(self.a, True)
+        self.state.set("push_enabled", False)
+        self.state.enqueue("other", "cli", "completed", "host-disabled")
+        self.assertEqual(len(self.state.outbox()), 1)
+        self.state.revoke(self.a)
+        self.assertFalse(self.state.all_session_notifications(self.a))
+        self.assertEqual(self.state.outbox(), [])
+
     def test_compression_alias_follows_old_session(self):
         self.state.settings({"push_enabled": True})
         self.state.set_push(self.a, True)
@@ -121,6 +157,38 @@ class BoundaryTests(unittest.TestCase):
 
 
 class APITests(unittest.IsolatedAsyncioTestCase):
+    async def test_notification_scope_is_validated_and_device_scoped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = State(Path(directory))
+            first, second = str(uuid.uuid4()), str(uuid.uuid4())
+            for device in (first, second):
+                state.add_device(device, "Phone", "service", paired=True)
+            path = "/v1/devices/self/notification-scope"
+            self.assertEqual(await handle(state, first, "PUT", path, {"all_sessions": True}, {}, None), {"all_sessions": True})
+            self.assertEqual(await handle(state, second, "GET", path, {}, {}, None), {"all_sessions": False})
+            for body in ({}, {"all_sessions": "true"}, {"all_sessions": True, "device_id": second}):
+                with self.assertRaises(ValueError):
+                    await handle(state, first, "PUT", path, body, {}, None)
+            state.revoke(first)
+            with self.assertRaises(PermissionError):
+                await handle(state, first, "PUT", path, {"all_sessions": True}, {}, None)
+
+    async def test_upload_requires_approved_device_and_returns_saved_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = State(Path(directory))
+            device = str(uuid.uuid4())
+            body = {"upload_id": str(uuid.uuid4()), "filename": "notes.txt", "offset": 0,
+                    "total": 5, "content_base64": base64.b64encode(b"hello").decode()}
+            with self.assertRaises(PermissionError):
+                await handle(state, device, "PUT", "/v1/uploads", body, {}, None)
+            state.add_device(device, "Phone", "service", paired=True)
+            result = await handle(state, device, "PUT", "/v1/uploads", body, {}, None)
+            self.assertTrue(result["complete"])
+            self.assertEqual(Path(result["path"]).read_bytes(), b"hello")
+            state.revoke(device)
+            with self.assertRaises(PermissionError):
+                await handle(state, device, "PUT", "/v1/uploads", body, {}, None)
+
     async def test_background_presence_clears_without_coordinates(self):
         with tempfile.TemporaryDirectory() as directory:
             state = State(Path(directory))

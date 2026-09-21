@@ -2,7 +2,7 @@
 
 The Hermes plugin for **Hermes Jr.**, our iPhone app.
 
-Connect to your Hermes agent from your phone and get notified when a conversation you follow finishes or needs your attention. The companion runs in the background on your Hermes computer. **Your conversations and notification details are encrypted before they reach our relay.**
+Connect to your Hermes agent from your phone and get notified when a conversation finishes or needs your attention. The companion runs in the background on your Hermes computer. **Your conversations and notification details are encrypted before they reach our relay.**
 
 ## Connecting an iPhone
 
@@ -34,12 +34,14 @@ For new installations, our service address is **https://hermes-jr-companion.cybe
 ## What it does
 
 - **Connect from anywhere:** encrypted remote access without setting up Tailscale or opening a public port.
-- **Notify you when needed:** updates from conversations you open or follow in Jr.
+- **Notify you when needed:** updates from conversations you open or follow in Jr., with an option to include all sessions.
+- **Send documents:** upload files from your phone for Hermes to use in a conversation.
+- **Continue a terminal conversation:** explicitly close a verified standalone Hermes CLI session and continue it on your phone.
 - **Keep working in the background:** automatic startup and recovery if the companion stops unexpectedly.
 
 Already using Tailscale or a direct connection? You can enable notifications independently of remote access.
 
-Your Hermes computer needs to be awake, with its Hermes dashboard running. The app and companion are currently in development; the hosted notification service supports iOS development builds.
+Your Hermes computer needs to be awake, with its Hermes dashboard running. The app and companion are currently in development. The hosted notification service is configured for development builds and the maintainer's internal TestFlight builds.
 
 ## Make it your own
 
@@ -64,3 +66,8 @@ Updates are installed only when you ask. From 0.7.0, the companion verifies a re
 The current setup flow requires companion 0.12.0 and the matching iOS app and service updates. Service operators must configure a separate setup signing key and the new temporary-session migration before enabling it.
 
 The [setup protocol](Protocol/SETUP.md) documents its trust boundaries, verification steps, limits, and test coverage. The [service guide](RelayService/README.md#phone-bound-numeric-pairing) covers deployment configuration. This new protocol integration has not had an independent security audit.
+
+## Hermes compatibility
+
+The versioned mobile adapter and daily old/new Hermes checks are described in
+[Mobile protocol and compatibility monitoring](docs/mobile-protocol.md).

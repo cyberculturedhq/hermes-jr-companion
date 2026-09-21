@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { newToken } from "../src/protocol";
 import { verifyTicket } from "../src/setup-ticket";
 
-type Intent = { ticket: string; intent_id: string; owner_token: string; expires_at: number };
+type Intent = { ticket: string; prompt: string; intent_id: string; owner_token: string; expires_at: number };
 type Host = { installation_id: string; host_token: string };
 let count = 0;
 function request(path: string, method = "GET", token?: string, body?: unknown, ticket?: string) {
@@ -40,6 +40,12 @@ beforeEach(() => { vi.spyOn(globalThis, "fetch").mockImplementation(async () => 
 afterEach(async () => { await reset(); vi.restoreAllMocks(); });
 
 describe("phone-bound setup broker", () => {
+  it("returns the complete install prompt with the issued ticket and no owner credential", async () => {
+    const intent = await create();
+    expect(intent.prompt).toBe(`Install the Hermes Jr. plugin from https://github.com/cyberculturedhq/hermes-jr-companion and connect my iPhone.\n\nSetup ticket:\n${intent.ticket}`);
+    expect(intent.prompt).not.toContain(intent.owner_token);
+    expect(new TextEncoder().encode(intent.prompt).length).toBeLessThanOrEqual(8192);
+  });
   it("retries device provisioning without rotating credentials or creating another device", async () => {
     const h = await host(), id = crypto.randomUUID(), token = newToken();
     const resource = `/v1/installations/${h.installation_id}/devices/${id}`;

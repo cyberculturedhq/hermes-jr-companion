@@ -2,6 +2,7 @@ import { pushAvailable } from "./apns";
 import { exactKeys, failure, handleErrors, json, readJson } from "./http";
 import { bearer, LIMITS, newToken, sameHash, PROTOCOL_VERSION, tokenHash, UUID_PATTERN } from "./protocol";
 import { issueTicket, verifyTicket, setupPublicKey, key32 } from "./setup-ticket";
+import { setupPrompt } from "./setup-prompt";
 export { SetupIntent } from "./setup";
 export { InstallationRelay } from "./installation";
 export { ServiceAdmission } from "./admission";
@@ -40,7 +41,7 @@ export default {
           const { ticket, intent } = await issueTicket(env, body.phone_public_key, url.origin);
           const owner = newToken();
           await env.SETUP_INTENTS.getByName(intent.intent_id).initialize(intent, await tokenHash(owner));
-          return json({ ticket, owner_token: owner, ...intent }, 201);
+          return json({ ticket, prompt: setupPrompt(ticket), owner_token: owner, ...intent }, 201);
         }
         const match = /^\/v1\/pairing\/([A-Za-z0-9_-]{43})(?:\/(push|complete|cancel)|\/claims(?:\/([0-9a-f-]{36})(?:\/(key|reveal|confirm|enrollment))?)?)?$/.exec(url.pathname);
         const raw = bearer(request);

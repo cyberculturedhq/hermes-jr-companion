@@ -1,6 +1,6 @@
 # Hermes Jr. relay service
 
-The service that connects Hermes Jr. to the companion and delivers iPhone notifications. No account, tunnel installation, or public port on the Hermes machine is required. Both peers initiate outbound WebSocket connections. A sandbox development service is available for the maintainer’s iOS development build; see [installation instructions](../INSTALL.md). There is no production service yet.
+The service that connects Hermes Jr. to the companion and delivers iPhone notifications. No account, tunnel installation, or public port on the Hermes machine is required. Both peers initiate outbound WebSocket connections. The hosted service is configured for the maintainer's development and internal TestFlight builds; see [installation instructions](../INSTALL.md). The app remains in internal testing.
 
 The Worker routes opaque binary records. End-to-end encryption, authenticated pairing, application admission, replay protection, and mapping requests to the local Hermes dashboard belong to the companion/iOS protocol. A routing token grants network access to one device lane; **it does not grant access to Hermes**. The host must complete encrypted pairing and authorize every device before forwarding any application request.
 
@@ -73,7 +73,7 @@ Client text messages are rejected with WebSocket close 1003. Oversized/empty rec
 
 Push registration and dispatch use HTTP and work when no relay WebSocket is open. Set these secrets on the eventual deployment: `APNS_TEAM_ID`, `APNS_KEY_ID`, `APNS_TOPIC` (the app's exact bundle identifier), and `APNS_PRIVATE_KEY` (the Apple `.p8` PKCS#8 PEM). Do not put an Apple signing key on a phone or Hermes user's machine. With any value missing, capabilities reports `push:false` and push registration/dispatch returns `503 push_unavailable`.
 
-Set the non-secret `APNS_ENVIRONMENT` Wrangler variable to `sandbox` or `production` if the signing key is restricted to one environment. Use `both` only when the Apple key supports both. The service rejects incompatible registrations and existing registrations after a scope change with `409 push_environment_not_allowed`. `APNS_TOPIC` must also be allowed by that key's topic scope; this service supports one configured topic. It cannot extend an Apple key's capabilities. No actual Apple signing material is included here.
+Set the non-secret `APNS_ENVIRONMENT` Wrangler variable to `sandbox` or `production` for a single environment. Use `both` when the base Apple key supports both environments, or when separate sandbox and production credentials are configured as described below. The service rejects incompatible registrations and existing registrations after a scope change with `409 push_environment_not_allowed`. `APNS_TOPIC` must also be allowed by each key's topic scope; this service supports one configured topic. It cannot extend an Apple key's capabilities. No actual Apple signing material is included here.
 
 The host generates an unrelated random base64url reference, 32–64 characters, for each notification. It retains any mapping to local session/action state privately. The service cannot check entropy, so the companion must never substitute a session ID, command, or text for this reference. A legacy or generic-only APNs payload is:
 
@@ -142,7 +142,12 @@ shipping the matching app and companion. Generate it privately with
 `Scripts/create-setup-signing-key.py`; do not reuse APNs or release-signing keys.
 Without this secret, new pairing is unavailable; already-paired devices can still reconnect.
 
-`POST /v1/pairing/intents` creates the ticket and a separate owner credential.
+`POST /v1/pairing/intents` creates the ticket, a separate owner credential, and
+`prompt`, the complete text iOS copies/shares. Edit `src/setup-prompt.ts` and deploy
+the relay to change the wording for new attempts without another iOS release
+(after users have installed the app version that consumes this field). Deploy
+the relay before that app version. Existing pending attempts retain their saved
+text; older clients continue using their bundled wording.
 `GET /v1/pairing/key` exposes only the issuer's public key. Subsequent setup
 requests carry the public ticket in `X-Hermes-Setup` and the appropriate private
 credential in `Authorization`. Hosts need an admitted installation to claim;
@@ -153,3 +158,7 @@ bounded initial rollout; App Attest is not yet implemented.
 
 Read `Protocol/SETUP.md` for the complete construction, API roles, lifecycle,
 limitations, signing-key rotation behavior, and validation.
+
+### Separate APNs environment keys
+
+`APNS_KEY_ID` and `APNS_PRIVATE_KEY` remain the base credentials (sandbox on the hosted service). To use a separate production-only, topic-specific Apple key, set both optional secrets `APNS_PRODUCTION_KEY_ID` and `APNS_PRODUCTION_PRIVATE_KEY`, then set `APNS_ENVIRONMENT` to `both`. The production key must allow `APNS_TOPIC` and belong to `APNS_TEAM_ID`. A partial production override fails closed; it never falls back to the sandbox key. Without either override, existing self-hosted dual-environment keys retain their current behavior. Provider tokens are cached separately by signing key, including across Durable Object restarts.

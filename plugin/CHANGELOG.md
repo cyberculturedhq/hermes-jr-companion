@@ -1,3 +1,16 @@
+## 0.14.0
+
+- Correct Linux systemd working-directory syntax and repair the exact older backend definition; validate generated units with systemd itself.
+- Support separate topic-restricted production and sandbox APNs keys with isolated durable signing-token caches.
+
+- Negotiate a stable mobile protocol and run compatibility checks against supported older Hermes versions, the latest release, and upstream main.
+- Upload documents in bounded, device-scoped chunks for use in phone conversations.
+- Offer an explicit, verified handoff from a standalone local Hermes CLI session to the phone; shared server sessions are never terminated.
+- Let each phone receive notifications from all sessions while preserving followed-only defaults and foreground suppression.
+- Return the current setup prompt from the hosted service so future wording fixes can reach new pairing attempts without an iOS update.
+
+Protocol and state compatibility remain at version 1. Existing pairings and profile activation choices are preserved; the new features need the matching iOS app. Updates remain explicit and signed.
+
 ## 0.13.3
 
 - Recognize identical copied Python executables in the same environment when checking backend ownership; continue rejecting changed binaries and definitions.
