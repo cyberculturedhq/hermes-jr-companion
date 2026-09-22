@@ -46,13 +46,10 @@ class SetupJobTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(self.ticket,json.dumps(value))
         self.assertNotEqual(value['status'],'connected')
 
-    async def test_completion_descriptor_needs_only_command_and_timeout(self):
+    async def test_pairing_status_does_not_ask_model_to_start_a_watcher(self):
         await jobs.command(self.state, self.service, self.ticket, 'iPhone', wait_seconds=0)
-        value = jobs.result(self.state, jobs.identity(self.ticket))['completion_watch']
-        self.assertEqual(value['name'], 'terminal')
-        self.assertEqual(set(value['arguments']), {'command', 'timeout'})
-        self.assertEqual(value['arguments']['timeout'], 360)
-        self.assertIn('-m hermes_jr.cli pair --watch ' + jobs.identity(self.ticket), value['arguments']['command'])
+        value = jobs.result(self.state, jobs.identity(self.ticket))
+        self.assertNotIn('completion_watch', value)
         self.assertNotIn(self.ticket, json.dumps(value))
 
     async def test_expiry_never_reports_completion_and_hides_old_code(self):
@@ -124,6 +121,8 @@ class SetupJobTests(unittest.IsolatedAsyncioTestCase):
         for error, reason in [(SetupFailure('cancelled'), 'cancelled'), (SetupFailure('verification'), 'verification'),
                               (ServiceError(403), 'rejected'), (ServiceError(404), 'unavailable'),
                               (RuntimeError('secret-do-not-print'), 'internal')]:
+            with self.state.connect() as db:
+                db.execute("UPDATE setup_jobs SET status='pending' WHERE id=?", (identity,))
             with patch.object(jobs, 'run', side_effect=error):
                 await jobs.perform(self.state, self.service, {'id': identity, 'ticket': self.ticket, 'name': 'iPhone'})
             value = jobs.result(State(self.state.directory), identity)

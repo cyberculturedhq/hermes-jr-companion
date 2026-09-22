@@ -111,9 +111,16 @@ class State:
         with self.connect() as db:
             return [dict(row) for row in db.execute("SELECT * FROM devices WHERE revoked=0 ORDER BY created")]
 
-    def add_device(self, device_id, name, service_token, *, paired=False, secret=None, expires=0, automatic=False, expected_key=None):
+    def add_device(self, device_id, name, service_token, *, paired=False, secret=None, expires=0, automatic=False, expected_key=None, setup_job_id=None):
         local = token()
         with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            if setup_job_id:
+                job = db.execute("SELECT status FROM setup_jobs WHERE id=?", (setup_job_id,)).fetchone()
+                if not job or job[0] not in {'pending', 'ready'}:
+                    from .setup_failures import SetupFailure
+                    raise SetupFailure('cancelled')
+                db.execute("INSERT INTO setup_enrollments VALUES (?,?)", (setup_job_id, device_id))
             db.execute("INSERT INTO devices(id,name,local_digest,service_token,pair_digest,pair_expires,approved,created) VALUES(?,?,?,?,?,?,?,?)",
                        (device_id, name[:80], digest(local), service_token, digest(secret) if secret else None,
                         expires, int(paired), time.time()))

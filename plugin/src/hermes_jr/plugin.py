@@ -55,3 +55,5 @@ def register(ctx):
     ctx.register_hook("pre_tool_call", tool)
     from .cli import configure_parser, dispatch
     ctx.register_cli_command("jr", "Hermes Jr. companion", configure_parser, dispatch)
+    from .pairing_panel import register as register_pairing_panel
+    register_pairing_panel(ctx)

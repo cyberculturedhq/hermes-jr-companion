@@ -20,7 +20,7 @@ REPO = 'cyberculturedhq/hermes-jr-companion'
 SOURCE = 'https://github.com/' + REPO + '.git#plugin'
 API = 'https://api.github.com/repos/' + REPO
 PUBLIC_KEY = 'ac072d31db546d1f241ac1ace40cb0b474bd4e833d78385cb9f03499e44778af'
-MINIMUM = (0, 12, 0)
+MINIMUM = (0, 15, 0)
 
 
 def version(value):
@@ -99,9 +99,10 @@ def profiles():
     return homes
 
 
-HANDOFF = ('Follow INSTALL.md step 2 with the phone ticket. Show only the comparison code and the phone action, '
-           'then run completion_watch.arguments in the same turn. After connected, say only: Your iPhone is connected. '
-           'Keep Python paths, commands, versions and JSON out of the user handoff.')
+HANDOFF = ('Follow INSTALL.md step 2 with the phone ticket. The native Hermes pairing panel displays the code '
+           'and waits for confirmation on the iPhone. Do not display the code yourself or start a watcher. '
+           'After installing or updating, restart the Hermes CLI process or quit and reopen Hermes Desktop to load the plugin. '
+           'After connected, say only: Your iPhone is connected.')
 
 
 def inspect(command):
@@ -114,8 +115,8 @@ def inspect(command):
 
 def reuse(installed):
     # No GitHub access, package replacement, profile activation or service restart.
-    if version(installed) < (0, 11, 0):
-        raise ValueError('This companion needs an update for the current pairing flow. Ask the user before updating; keep the existing installation.')
+    if version(installed) < MINIMUM:
+        raise ValueError('Native pairing panels require companion 0.15.0 or newer. Follow UPDATES.md for an explicit update, then reopen the interactive Hermes session. Existing connections are unchanged; do not reinstall as a generic repair.')
     health = inspect(['doctor'])
     manager = inspect(['service', 'status'])
     backend = inspect(['backend', 'status'])

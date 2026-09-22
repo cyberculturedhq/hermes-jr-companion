@@ -58,6 +58,7 @@ PYTHON -m hermes_jr.cli service status
 - **Service failure:** inspect the private log path returned by `service status`. Fix the reported error before restarting.
 - **Outdated pairing worker:** restart the companion service after updating.
 - **Expired ticket:** keep the working installation and request a fresh prompt from Jr.
+- **Pairing panel not active:** reopen the interactive Hermes CLI, or quit/reopen Hermes Desktop after a companion update. A terminal subprocess cannot load the plugin into its parent conversation. Use the same updated Hermes Python environment. Do not replace the panel with reasoning text, chat text, or a background watcher. Older Hermes builds without native question support need a Hermes update; existing phone connections continue working.
 
 Dashboard credentials supplied through `HERMES_JR_DASHBOARD_TOKEN` or `HERMES_JR_DASHBOARD_SESSION_TOKEN` are saved privately by companion service installation. Stop and reinstall that service to update them. Normal loopback authentication does not need a manually supplied token.
 
