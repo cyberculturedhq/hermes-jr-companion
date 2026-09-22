@@ -47,7 +47,7 @@ def encrypt(key, event, details):
     validate_key(key)
     reference = event["reference"]
     decode(reference, 32)
-    if event["kind"] not in {"completed", "error", "approval", "clarification"}:
+    if event["kind"] not in {"completed", "error", "approval", "clarification", "update_completed"}:
         raise ValueError("Unknown notification event")
     content = {"kind": event["kind"], "profile": clean(details.get("profile_name") or event["profile"], 120) or "Hermes",
                "conversation": clean(details.get("session_title"), 240), "expires": int(time.time()) + 3600}

@@ -1,3 +1,10 @@
+## 0.16.0
+
+- Track explicitly requested iPhone updates through the signed installer, including the first upgrade from older companions.
+- Send one encrypted update-completion notification to the requesting phone after installed-version and connection checks pass. Respect notification settings and revocation; recover committed results after a bridge restart.
+- Publish signed release metadata for faster foreground update notices in Hermes Jr. No update check starts a model conversation or installs code.
+- Keep existing Hermes-process restarts explicit. Package installation success does not claim that already-loaded hooks were reloaded.
+
 ## 0.15.0
 
 - Display pairing codes directly in Hermes' native CLI/TUI and desktop question interfaces. The plugin owns waiting and dismissal; code display no longer depends on model output or reasoning visibility.

@@ -211,8 +211,10 @@ class Bridge:
         from .cleanup import watch as watch_cleanup
         from .updates import watch as watch_updates
         from .diagnostics import watch as watch_health
+        from .update_requests import watch as watch_update_requests
         tasks = [asyncio.create_task(self.relay()), asyncio.create_task(self.maintenance()),
                  asyncio.create_task(watch_updates(self.state, self.client)),
+                 asyncio.create_task(watch_update_requests(self.state)),
                  asyncio.create_task(watch_health(self.state, self.client)),
                  asyncio.create_task(watch_cleanup(self.state, self.service)),
                  asyncio.create_task(watch_setup(self.state, self.service))]

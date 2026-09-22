@@ -13,7 +13,7 @@ from .release_signature import verify, signature_from_body
 REPOSITORY = 'cyberculturedhq/hermes-jr-companion'
 API = 'https://api.github.com/repos/' + REPOSITORY
 INTERVAL = 24 * 60 * 60
-VERSION = '0.14.0'
+from . import __version__ as VERSION
 
 
 def version(value):
@@ -93,7 +93,8 @@ async def watch(state, client):
 def public_status(state):
     """Only validated version information crosses to the phone, never a remote URL."""
     current = installed_version()
-    result = {'installed': current, 'available': False}
+    result = {'installed': current, 'available': False, 'tracking': 1,
+              'checks_enabled': state.get('update_checks_enabled', True)}
     cached = state.get('update_status', {})
     if not state.get('update_checks_enabled', True) or cached.get('state') != 'available':
         return result

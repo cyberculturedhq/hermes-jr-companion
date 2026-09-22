@@ -89,6 +89,35 @@ class InstallerTests(unittest.TestCase):
         self.assert_old()
         self.assertEqual(self.manager.start.call_count,2)
 
+    def test_guided_update_commits_receipt_with_real_snapshot_and_queues_success(self):
+        self.guided_update(fail=False)
+
+    def test_guided_update_rollback_preserves_pairing_and_never_queues_success(self):
+        self.guided_update(fail=True)
+
+    def guided_update(self, *, fail):
+        import base64, time, uuid
+        from hermes_jr import update_requests
+        device = str(uuid.uuid4())
+        self.state.add_device(device, 'Phone', 'fixture', paired=True)
+        self.state.set('push_enabled', True); self.state.set_push(device, True)
+        receipt = dict(id=str(uuid.uuid4()), device_id=device, profile='default', session_id='update-chat',
+                       target='0.4.0', notify=True, created=time.time())
+        encoded = base64.urlsafe_b64encode(json.dumps(receipt).encode()).decode().rstrip('=')
+        if fail: self.stage_fail = 'doctor'
+        with patch.object(update_requests, 'installed_version', side_effect=lambda: '0.4.0' if (self.package/'code.py').read_text() == 'new' else '0.3.0'):
+            if fail:
+                with self.assertRaises(ValueError): update_requests.run_tracked(self.state, self.release, encoded)
+                self.assert_old()
+            else:
+                update_requests.run_tracked(self.state, self.release, encoded)
+        journal = Snapshot(json.loads((self.state.directory/'last-update.json').read_text())['backup']).journal
+        self.assertEqual(journal['update_request'], receipt['id'])
+        self.assertEqual(journal['phase'], 'rolled_back' if fail else 'complete')
+        self.assertEqual(update_requests.status(self.state, device, receipt['id'])['status'], 'failed' if fail else 'completed')
+        self.assertTrue(self.state.device(device)['approved'])
+        self.assertEqual(len(self.state.outbox()), 0 if fail else 1)
+
     def test_pip_failure_restores_all_installation_surfaces(self):
         self.stage_fail='pip'
         with self.assertRaisesRegex(ValueError,'previous companion was restored'):

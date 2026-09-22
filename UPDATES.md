@@ -2,7 +2,13 @@
 
 For removal, see [Complete removal](#complete-removal).
 
-The bridge checks stable GitHub releases once a day. Checks never install code or restart Hermes. When an update is available, Hermes Jr. shows a notice with a prompt you can copy to your agent. “Not now” hides that version from the profile list; it remains available in Connection settings. This is an in-app notice, not a push notification.
+The bridge checks stable GitHub releases once a day. New Hermes Jr. iOS builds also check the hosted signed release feed on foreground/open and reconnect, with a 15-minute app cache and a five-minute server cache. **Check for updates** in Settings bypasses the app cache. Checks never install code, start model conversations, or restart Hermes. The host’s checks-off preference also disables automatic phone checks on companions that advertise that preference.
+
+The update notice offers **Update with Hermes** or **Copy update prompt**. Update with Hermes starts one new conversation in the default profile and uses the normal model allowance, only after the user taps it. The app remembers that request across reconnects and relaunches; it never automatically resends an uncertain prompt. If an update needs attention, open its conversation before starting another action.
+
+When notifications are enabled, a successful guided update sends an encrypted completion notification to the requesting phone, linking to that conversation. The signed installer verifies the installed version and connection before recording success. Model output alone cannot complete a request. Notification opt-out and device revocation are checked again at completion. Copied prompts without a tracking receipt still use the normal updater but do not request a completion push.
+
+The app says when the package has been installed and reminds the user to restart existing Hermes sessions when their work is finished. This is necessary to load new hooks. The updater does not terminate active Hermes conversations. “Not now” hides an available version from Bots; it remains visible in Settings.
 
 ```sh
 hermes jr update
@@ -51,7 +57,7 @@ Removed requirements leave shared packages installed. Added or changed requireme
 
 Managed updates support standard, unmodified native installations using the official `.git#plugin` source. Forks, editable installs, linked directories, added or changed dependency requirements, and protocol/state migrations need release-specific manual instructions. The updater does not change shared dependencies or silently migrate data.
 
-Checks use stable `vMAJOR.MINOR.PATCH` GitHub releases, not development `main`. GitHub receives the host’s network address and a generic user agent, but no pairing or Hermes credentials. Failed checks do not interrupt the bridge. iPhone notices expire after seven days without a successful fresh check.
+Checks use stable `vMAJOR.MINOR.PATCH` GitHub releases, not development `main`. The hosted feed contains only a signed version and commit; no device identifiers or model prompts. GitHub receives the host’s network address and a generic user agent, but no pairing or Hermes credentials. Failed checks do not interrupt the bridge. The legacy host notice expires after seven days without a successful check. Guided receipts expire after one day if they have not started and are retained for at most seven days.
 
 Before releasing, run Python and Worker checks, build the package, and exercise update and recovery paths. Actual OS lifecycle changes also require runtime tests. Automated tests do not constitute an independent security audit.
 
@@ -75,7 +81,7 @@ python tools/sign_release.py --key /private/path/release-ed25519.pem --version V
 ```
 
 Include the resulting HTML comment unchanged in the GitHub release body, and
-create its `vVERSION` tag at that exact commit. Tag rules prevent later moves and
+create its `vVERSION` tag at that exact commit. The release-feed workflow validates that signature and attaches `companion-release.json`; it has no private signing key. Tag rules prevent later moves and
 deletion. Keep a secure backup of the private key. Key rotation requires a release
 signed by the currently trusted key that ships the next trusted public key;
 losing that key requires a clearly communicated manual reinstall. A GitHub

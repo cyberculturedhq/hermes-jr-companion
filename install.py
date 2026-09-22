@@ -132,7 +132,9 @@ def reuse(installed):
                       'reused': True, 'next_step': HANDOFF}), flush=True)
 
 
-def install(update=False):
+def install(update=False, receipt=None):
+    if receipt and (not update or not re.fullmatch(r'[A-Za-z0-9_-]{1,2048}', receipt)):
+        raise ValueError('An update receipt requires --update and must be a valid receipt from Jr.')
     try:
         installed = importlib.metadata.version('hermes-jr-companion')
     except importlib.metadata.PackageNotFoundError:
@@ -143,7 +145,7 @@ def install(update=False):
         raise ValueError('No companion is installed. Run without --update for first installation.')
     selected = release()
     target, commit = selected['latest'], selected['commit']
-    if installed and version(installed) >= version(target):
+    if installed and version(installed) >= version(target) and not receipt:
         return reuse(installed)
     homes = profiles()
     from hermes_constants import get_default_hermes_root
@@ -180,10 +182,16 @@ def install(update=False):
         # All explicit upgrades use the same managed updater and rollback record.
         # Load the verified candidate in a separate process so old updater versions
         # can also handle a release that only removes an unused dependency.
-        code = ('import sys,json; sys.path.insert(0,sys.argv[1]); '
-                'from hermes_jr.installer import install; from hermes_jr.state import State; '
-                'install(State(),json.loads(sys.argv[2]))')
-        run(['-c', code, str(candidate / 'src'), json.dumps(selected)])
+        if receipt:
+            code = ('import sys,json; sys.path.insert(0,sys.argv[1]); '
+                    'from hermes_jr.update_requests import run_tracked; from hermes_jr.state import State; '
+                    'run_tracked(State(),json.loads(sys.argv[2]),sys.argv[3])')
+            run(['-c', code, str(candidate / 'src'), json.dumps(selected), receipt])
+        else:
+            code = ('import sys,json; sys.path.insert(0,sys.argv[1]); '
+                    'from hermes_jr.installer import install; from hermes_jr.state import State; '
+                    'install(State(),json.loads(sys.argv[2]))')
+            run(['-c', code, str(candidate / 'src'), json.dumps(selected)])
         print(json.dumps({'status': 'updated', 'version': target,
                           'message': 'The companion was updated. Existing profile choices and pairings were preserved.',
                           'next_step': 'Restart loaded Hermes sessions when idle, as described in UPDATES.md. Pairing is a separate action.'}), flush=True)
@@ -247,6 +255,7 @@ def install(update=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--update', action='store_true', help='Install an explicitly requested update when Hermes work is idle')
+    parser.add_argument('--receipt', help='Opaque Hermes Jr. update receipt; requires --update')
     args = parser.parse_args()
     python = hermes_python()
     if os.path.abspath(sys.executable) != python:
@@ -258,7 +267,7 @@ def main():
     with (directory / 'install.lock').open('a') as handle:
         try: fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError: raise ValueError('Another Hermes Jr installer is running.') from None
-        install(update=args.update)
+        install(update=args.update, receipt=args.receipt)
 
 
 if __name__ == '__main__':
