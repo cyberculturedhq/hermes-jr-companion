@@ -104,6 +104,7 @@ class LegacyGatewayPanel:
         self.server, self.sid = server, sid
         self.rid = None
         self.event = None
+        self.answered = False
         if not callable(getattr(server, "_emit", None)) or not all(
                 hasattr(server, name) for name in ("_prompt_lock", "_pending", "_answers", "_pending_prompt_payloads")):
             raise ValueError("Unsupported gateway")
@@ -116,6 +117,8 @@ class LegacyGatewayPanel:
 
     def show(self, text):
         self.close()
+        if self.cancelled():
+            return
         server = self.server
         payload = {"question": text, "choices": ["Cancel pairing"], "request_id": uuid.uuid4().hex}
         with server._prompt_lock:
@@ -126,13 +129,14 @@ class LegacyGatewayPanel:
         server._emit("clarify.request", self.sid, dict(payload))
 
     def cancelled(self):
-        return self.event is not None and self.event.is_set()
+        return self.answered or (self.event is not None and self.event.is_set())
 
     def close(self):
         if self.rid is None:
             return
         server, rid = self.server, self.rid
         with server._prompt_lock:
+            self.answered = self.answered or self.event.is_set()
             server._pending.pop(rid, None)
             server._pending_prompt_payloads.pop(rid, None)
             server._answers.pop(rid, None)
