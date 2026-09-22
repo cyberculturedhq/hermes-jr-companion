@@ -3,6 +3,7 @@ import { exactKeys, failure, handleErrors, json, readJson } from "./http";
 import { bearer, LIMITS, newToken, sameHash, PROTOCOL_VERSION, tokenHash, UUID_PATTERN } from "./protocol";
 import { issueTicket, verifyTicket, setupPublicKey, key32 } from "./setup-ticket";
 import { setupPrompt } from "./setup-prompt";
+import { companionRelease } from "./companion-release";
 export { SetupIntent } from "./setup";
 export { InstallationRelay } from "./installation";
 export { ServiceAdmission } from "./admission";
@@ -28,6 +29,10 @@ export default {
       // CF-Connecting-IP is set by Cloudflare at ingress; a shared fallback deliberately fails
       // closed for unidentified callers, and makes localhost limits real instead of bypassed.
       const ip = request.headers.get("CF-Connecting-IP") ?? "unidentified";
+      if (url.pathname === "/v1/companion-release" && request.method === "GET") {
+        if (!env.REQUEST_RATE_LIMITER || !(await env.REQUEST_RATE_LIMITER.limit({ key: `release:${ip}` })).success) return failure(429, "rate_limited");
+        return companionRelease(request);
+      }
       if (url.pathname.startsWith("/v1/pairing/")) {
         const creating = url.pathname === "/v1/pairing/intents" && request.method === "POST";
         const limiter = creating ? env.INSTALL_RATE_LIMITER : env.REQUEST_RATE_LIMITER;

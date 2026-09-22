@@ -30,6 +30,14 @@ async def handle(state, device_id, method, path, body, query, client):
     if path == "/v1/uploads" and method == "PUT":
         from .uploads import upload
         return upload(state, device_id, body)
+    if re.fullmatch(r'/v1/update-requests/[0-9a-f-]{36}', path) and method in {'GET', 'PUT'}:
+        from .update_requests import register, status
+        request_id = path.rsplit('/', 1)[1]
+        if method == 'PUT':
+            if body.get('id') != request_id:
+                raise ValueError('Update identity mismatch')
+            return register(state, body, device_id=device_id)
+        return status(state, device_id, request_id)
     if path == "/v1/session-handoff" and method in {"GET", "PUT"}:
         from .handoff import handle as handoff
         profile, sid = coordinate(query if method == "GET" else body)

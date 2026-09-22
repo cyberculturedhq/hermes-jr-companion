@@ -30,6 +30,8 @@ The encrypted `data` contains nonce (12), ciphertext (1024), and tag (16): 1052 
 
 The relay accepts only bounded envelope fields, never plaintext titles/bodies. It forwards the envelope with `mutable-content: 1`, generic alert text, and the existing opaque tap reference. Total APNs JSON remains below 4096 bytes. Old clients without a registered preview key receive the generic payload without an encrypted envelope.
 
+Guided updates add the encrypted event kind `update_completed`. Its opaque reference resolves to the update conversation. Only the signed installer or recovery of its committed journal may queue this event, after verifying the installed version and host connection; notification settings and revocation still apply. The delivery service sees no additional plaintext.
+
 The extension validates the envelope, authentication tag, lengths, padding, supported event, and expiry before displaying details. Expiry is one hour after encryption, with five minutes of future clock tolerance. Wrong keys, tampering, missing keys, or expiry fall back to a generic alert. Server-side reference deduplication limits repeated submissions; expiry bounds replay, but the extension does not maintain a persistent replay ledger, so a malicious delivery service could repeat a valid notification within that window. A push never approves an action; opening the app reconciles the authenticated host state.
 
 ## What the services can see

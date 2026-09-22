@@ -293,8 +293,10 @@ class State:
             db.execute("DELETE FROM notifications WHERE created<?", (time.time() - 7 * 86400,))
 
     def outbox(self):
+        from .update_requests import initialize
+        initialize(self)
         with self.connect() as db:
-            return [dict(row) for row in db.execute("SELECT n.* FROM notifications n JOIN devices d ON d.id=n.device_id WHERE n.delivered=0 AND n.next_attempt<? AND n.created>? AND d.revoked=0 AND d.push_enabled=1 ORDER BY n.created LIMIT 100", (time.time(), time.time() - 7 * 86400))]
+            return [dict(row) for row in db.execute("SELECT n.* FROM notifications n JOIN devices d ON d.id=n.device_id WHERE n.delivered=0 AND n.next_attempt<? AND n.created>? AND d.revoked=0 AND d.push_enabled=1 AND NOT (n.kind='completed' AND EXISTS (SELECT 1 FROM update_requests u WHERE u.device_id=n.device_id AND u.profile=n.profile AND u.session_id=n.session_id AND u.status!='failed' AND n.created<=COALESCE(u.finished+120,u.created+86400))) ORDER BY n.created LIMIT 100", (time.time(), time.time() - 7 * 86400))]
 
     def sent(self, reference, ok):
         with self.connect() as db:

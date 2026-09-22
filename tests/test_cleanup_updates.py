@@ -84,7 +84,7 @@ class CleanupTests(unittest.IsolatedAsyncioTestCase):
     def test_phone_update_payload_is_bounded_and_has_no_remote_url(self):
         with patch('hermes_jr.updates.installed_version', return_value='0.3.0'):
             self.state.settings({'update_status': {'state':'available','latest':'0.4.0', 'checked_at':time.time(), 'url':'https://evil.test', 'credential':'SECRET'}})
-            self.assertEqual(public_status(self.state), {'installed':'0.3.0','available':True,'version':'0.4.0'})
+            self.assertEqual(public_status(self.state), {'installed':'0.3.0','available':True,'version':'0.4.0','tracking':1,'checks_enabled':True})
             self.state.settings({'update_checks_enabled':False})
             self.assertFalse(public_status(self.state)['available'])
             self.state.settings({'update_checks_enabled':True,'update_status': {'state':'available','latest':'../../evil','checked_at':time.time()}})

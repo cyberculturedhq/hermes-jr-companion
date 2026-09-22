@@ -153,7 +153,7 @@ def verify_connection(state):
         raise ValueError('Updated companion failed its connection checks')
 
 
-def install(state, release):
+def install(state, release, *, receipt_id=None):
     from .release_signature import verify
     verify(release)
     if release.get('state') != 'available' or not re.fullmatch('[0-9a-f]{40}', release.get('commit', '')):
@@ -202,7 +202,7 @@ def install(state, release):
         snapshot = Snapshot.create(backups / uuid.uuid4().hex, resources,
                                    state_directory=str(state.directory.resolve()), python=sys.executable,
                                    previous_version=installed_version(), target_version=release['latest'],
-                                   commit=release['commit'], log=str(log), restart=bool(manager_state['bridge_running']),
+                                   commit=release['commit'], update_request=receipt_id, log=str(log), restart=bool(manager_state['bridge_running']),
                                    stop_command=(['launchctl', 'bootout', f'{manager.domain}/{manager.label}'] if manager.platform == 'darwin' else ['systemctl', '--user', 'stop', manager.unit]))
         write_json(pointer, {'backup': str(snapshot.directory)})
         try:

@@ -62,6 +62,12 @@ class BootstrapTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'externally managed'): bootstrap.reuse('0.15.0')
 
     def test_explicit_update_delegates_and_reports_update_without_pairing_checks(self):
+        self.check_explicit_update(None)
+
+    def test_first_guided_update_forwards_receipt_to_verified_candidate(self):
+        self.check_explicit_update('eyJmaXh0dXJlIjp0cnVlfQ')
+
+    def check_explicit_update(self, receipt):
         import contextlib,io,json,sys,tempfile,types
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -79,11 +85,12 @@ class BootstrapTests(unittest.TestCase):
                  patch.object(bootstrap,'profiles',return_value=[]), \
                  patch.object(bootstrap.subprocess,'run',side_effect=command) as run, \
                  patch.object(bootstrap,'reuse') as reuse, contextlib.redirect_stdout(output):
-                bootstrap.install(update=True)
+                bootstrap.install(update=True, receipt=receipt)
                 reuse.assert_not_called()
                 self.assertEqual(json.loads(output.getvalue().splitlines()[-1])['status'],'updated')
                 calls=[c.args[0] for c in run.call_args_list]
-                self.assertTrue(any('from hermes_jr.installer import install' in str(c) for c in calls))
+                imported = 'from hermes_jr.update_requests import run_tracked' if receipt else 'from hermes_jr.installer import install'
+                self.assertTrue(any(imported in str(c) and (not receipt or c[-1] == receipt) for c in calls))
                 self.assertFalse(any('enable' in c for c in calls))
 
     def test_fresh_install_reaches_supervised_startup_and_ready(self):
