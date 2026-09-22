@@ -226,6 +226,12 @@ class NativeSurfaceTests(unittest.TestCase):
         self.assertEqual(set(server._pending), {'unrelated'})
         self.assertEqual(server._answers, {})
         self.assertEqual(events[-1], ('clarify.expire', 'origin', {'request_id': rid}))
+        # A cancel arriving as the waiting panel gains its code must survive
+        # that refresh, even though the old request is withdrawn.
+        surface.show('Code after response')
+        self.assertTrue(surface.cancelled())
+        self.assertIsNone(surface.rid)
+        self.assertEqual(set(server._pending), {'unrelated'})
 
     def test_classic_uses_native_question_state_and_clears_only_its_panel(self):
         loop = SimpleNamespace(call_soon_threadsafe=lambda fn: fn())
