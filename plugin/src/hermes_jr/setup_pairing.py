@@ -37,7 +37,7 @@ class SetupExpired(SetupFailure):
         super().__init__('expired')
 
 
-async def run(state, service, ticket, name, report=None):
+async def run(state, service, ticket, name, report=None, job_id=None):
     if not state.get("relay_enabled") or not state.get("host_private_key"):
         raise ValueError("Configure and start the companion before pairing")
     if not 1 <= len(name) <= 80:
@@ -86,6 +86,11 @@ async def run(state, service, ticket, name, report=None):
         deadline = min(intent["expires_at"], saved.get("deadline", intent["expires_at"]))
         while time.time() < deadline:
             try:
+                if job_id:
+                    with state.connect() as db:
+                        job = db.execute("SELECT status FROM setup_jobs WHERE id=?", (job_id,)).fetchone()
+                    if not job or job[0] not in {'pending', 'ready'}:
+                        raise SetupFailure('cancelled')
                 remote = await broker.request("GET", suffix, credential=credential)
                 if remote["status"] in {"cancelled", "complete"}:
                     if saved.get("device_id") and (state.device(saved["device_id"]) or {}).get("approved") and state.get("setup-ready/" + saved["device_id"]):
@@ -118,12 +123,13 @@ async def run(state, service, ticket, name, report=None):
                             if "device_id" not in saved:
                                 saved.update(device_id=str(uuid.uuid4()), device_token=token(), pairing_secret=token())
                                 state.set(record_key, saved)
-                            # Idempotent resource creation handles lost replies without orphan devices.
-                            await service.request("PUT", service.device_path(saved["device_id"]),
-                                                  {"device_token": saved["device_token"]}, state.get("host_token"))
                             if not state.device(saved["device_id"]):
                                 state.add_device(saved["device_id"], name, saved["device_token"], secret=saved["pairing_secret"],
-                                    expires=deadline, automatic=True, expected_key=crypto.decode(intent["phone_public_key"], 32))
+                                    expires=deadline, automatic=True, expected_key=crypto.decode(intent["phone_public_key"], 32), setup_job_id=job_id)
+                            # Register locally first so cancellation can revoke an enrollment
+                            # even while this idempotent remote request is in flight.
+                            await service.request("PUT", service.device_path(saved["device_id"]),
+                                                  {"device_token": saved["device_token"]}, state.get("host_token"))
                             payload = dict(v=1, relay_url=state.get("service_url"), installation_id=claim["installation_id"],
                                 device_id=saved["device_id"], device_token=saved["device_token"], pairing_secret=saved["pairing_secret"],
                                 host_public_key=claim["host_public_key"], expires_at=deadline)
@@ -147,7 +153,7 @@ async def run(state, service, ticket, name, report=None):
         if not owns_lock or (isinstance(exc, ServiceError) and exc.status in {429, 500, 502, 503, 504}):
             raise  # Another process or a temporary service failure must not destroy resumable state.
         saved = state.get(record_key) or {}
-        if saved.get("device_id") and not (state.device(saved["device_id"]) or {}).get("approved"):
+        if saved.get("device_id") and (getattr(exc, 'reason', None) == 'cancelled' or not (state.device(saved["device_id"]) or {}).get("approved")):
             state.revoke(saved["device_id"])
         state.set(record_key, {"terminal": True, "reason": getattr(exc, "reason", "internal"), "expires_at": intent["expires_at"]})
         raise

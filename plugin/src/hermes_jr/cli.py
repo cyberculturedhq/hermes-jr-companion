@@ -43,7 +43,7 @@ def configure_parser(parser):
     pair.add_argument("--name", default="iPhone")
     pair.add_argument("--status", action="store_true", help="Read the service-owned pairing result for --ticket; never waits for approval")
     output = pair.add_mutually_exclusive_group(required=True)
-    output.add_argument("--watch", metavar="JOB_ID", help="Wait for pairing completion after showing the comparison code to the user")
+    output.add_argument("--watch", metavar="JOB_ID", help="Resume the native pairing panel for an existing attempt")
     output.add_argument("--ticket", help="Pair with the iPhone that created this public HJ1 setup ticket; compare the displayed codes")
     revoke = commands.add_parser("revoke", help="Immediately revoke this device locally and at the service")
     revoke.add_argument("device_id")
@@ -123,19 +123,22 @@ async def execute(args):
             state.settings(values)
             print("Companion configured. Read INSTALL.md in the installed plugin. Run hermes jr backend status; if no listener exists, run hermes jr backend install. Then run hermes jr service install and hermes jr doctor. The messaging gateway is not the dashboard backend.")
         elif args.jr_command == "pair":
+            from .pairing_panel import claim, public_result
+            from .setup_jobs import identity, result as job_result
+            claim(state, args.watch or identity(args.ticket))
             if args.watch:
                 if args.status:
                     raise ValueError("--watch cannot be combined with --status")
-                from .setup_jobs import wait_for_completion
-                result = await wait_for_completion(state, args.watch)
-                print(json.dumps(result, ensure_ascii=False), flush=True)
-                if result["status"] != "connected":
+                result = job_result(state, args.watch)
+                print(json.dumps(public_result(result), ensure_ascii=False), flush=True)
+                if result["status"] not in {"pending", "ready", "connected"}:
                     raise SystemExit(1)
                 return
             if getattr(args, "ticket", None):
                 from .setup_jobs import command
-                result = await command(state, service, args.ticket, args.name, status_only=args.status)
-                print(json.dumps(result, ensure_ascii=False))
+                result = await command(state, service, args.ticket, args.name, status_only=args.status,
+                                       before_start=lambda db: claim(state, identity(args.ticket), connection=db))
+                print(json.dumps(public_result(result), ensure_ascii=False))
                 if result["status"] in {"expired", "failed", "not_found"}:
                     raise SystemExit(1)
                 return

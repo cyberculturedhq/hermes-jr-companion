@@ -18,14 +18,14 @@ If the backend is externally managed, verify its persistent supervisor and curre
 
 ## 2. Pair
 
-Run `PYTHON -m hermes_jr.cli pair --ticket 'TICKET'`, using the returned Python path and exact ticket.
+Run `PYTHON -m hermes_jr.cli pair --ticket 'TICKET'` in the normal foreground terminal tool, using the returned Python path and exact ticket. The loaded Hermes Jr. plugin opens a native question panel in the originating CLI/TUI or desktop conversation. The panel displays the comparison code and closes automatically after authenticated connection. Confirmation remains on the iPhone; answering the panel cancels, never approves.
 
-- `pending`: wait a few seconds and repeat with `--status`.
-- `ready`: say “Check that **CODE** matches all three groups in Jr., then tap **It’s correct**.” Immediately call terminal with the returned `completion_watch.arguments` in the same turn. Wait for its result.
+- The plugin owns waiting and code display. Do not start a background process, call `clarify`, repeat the code in chat/reasoning, or ask for a chat reply.
 - `connected`: say **“Your iPhone is connected.”**
 - `failed` or `expired`: explain the returned reason and recovery action. A new prompt does not repair a backend or internal error. Keep the installed companion.
-- `not_found`: run the ticket command without `--status`.
+- `not_found`: use the ticket command without `--status`.
+- **Panel not active:** the plugin is not loaded in this conversation, the Python environment differs, or this Hermes version has no compatible native question interface. After installing/updating the companion, close and reopen the interactive Hermes session before retrying. Do not restart the messaging gateway as a substitute. Desktop may require quitting/reopening the app to refresh its backend. Preserve existing conversations and connections. If still unavailable, check the Hermes version; do not fall back to tool-output codes.
 
-Keep the user handoff short and nontechnical: code, phone action, then connection confirmation. Do not repeat Python paths, commands, package versions, process details, or JSON. The user confirms on the phone; never ask them to confirm back in chat. Only `connected` means success.
+Keep the user handoff short and nontechnical. The native panel supplies the code and phone action. Do not repeat Python paths, commands, package versions, process details, or JSON. Only `connected` means success. Cancelling in Hermes revokes this unfinished attempt; cancel the old setup on the iPhone before creating a new ticket.
 
 Tickets last twenty minutes; code comparison lasts up to five. If one expires, obtain a new prompt and reuse the installation. Notifications are optional; do not claim delivery works without a real backgrounded-phone test. Newly installed hooks load when existing Hermes sessions finish and restart.

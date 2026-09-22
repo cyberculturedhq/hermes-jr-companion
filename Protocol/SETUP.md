@@ -63,6 +63,17 @@ SHA-256 hash is stored by the service. It authorizes polling, submitting the pho
 key/confirmation, associating push, and cancelling/completing this intent. It does
 not by itself authorize Hermes access.
 
+`POST /v1/pairing/intents` also returns `prompt`, the complete plain-text install
+message including the issued ticket. Wording lives in
+`RelayService/src/setup-prompt.ts`; deploy the relay to change it for new attempts.
+iOS copies/shares this text verbatim and saves it with the pending attempt, so a
+relaunch preserves the same prompt and ticket. The app accepts at most 8192 UTF-8
+bytes, requires the verified ticket, and rejects text containing the owner token.
+Older relay responses and saved attempts without `prompt` use the legacy local
+wording. Deploy the relay first, then release the app that consumes `prompt`;
+subsequent wording changes require only a relay deployment. Already-installed
+older iOS versions continue using their local wording.
+
 The service uses a separate Ed25519 signing secret, `SETUP_TICKET_PRIVATE_KEY`
 (base64url PKCS#8 DER). Rotation deliberately invalidates outstanding tickets;
 users create fresh prompts. Never reuse APNs or release-signing keys.
@@ -151,10 +162,11 @@ protocol. See [HPKE.md](HPKE.md) for its remaining limitations.
   phone key submission, capped by the ticket. Both endpoints enforce local
   deadlines; service-side clocks are not the only expiry check.
 - Phone state persists in Keychain; host state persists in the private companion
-  SQLite database. The companion service owns one active pairing job, protected by the host process lock. CLI calls return bounded JSON results and do not own the session.
-  Interrupting a process resumes the same keys/claim; it does not reset limits.
-- Both sides erase temporary keys after success. Cancellation revokes pending
-  local enrollment and clears phone state. Host background cleanup removes
+  SQLite database. The companion service owns one active pairing job, protected by the host process lock. The CLI subprocess returns bounded, status-only JSON; the plugin execution middleware owns the native pairing panel and waits for the service. Codes are read locally by that panel, never returned to the model.
+  Restarting the companion service resumes the same keys/claim; it does not reset limits. Cancelling or interrupting the native pairing panel cancels that unfinished host attempt.
+- Both sides erase temporary keys after success. Phone cancellation revokes pending
+  local enrollment and clears phone state. Host-panel cancellation revokes only
+  its unfinished enrollment; cancel the old setup in Jr. before creating a new ticket. Host background cleanup removes
   abandoned setup secrets on expiry. Service completion/cancellation removes
   push destinations and exchange payloads immediately, retaining small replay
   tombstones until the ticket expires. Alarms then erase the remaining records.
@@ -179,13 +191,13 @@ Generate a signing key into a private file with
 Configure its contents as the service's `SETUP_TICKET_PRIVATE_KEY` secret using
 Wrangler; use `.dev.vars` only for local development. Deploy the `v3-setup`
 Durable Object migration alongside the service. The iOS app and updated companion
-must be released together with service support. The companion owns pairing in the service: `pair --ticket` returns pending or ready before approval, and `pair --ticket ... --status` reads completion. Only `connected` indicates success; expiry and failure exit nonzero. Numeric comparison is the only supported new pairing flow.
+must be released together with service support. The companion service owns the exchange. From companion 0.15.0, `pair --ticket` requires a loaded native question integration. Its subprocess hands off to the plugin, which displays the code in the originating CLI/TUI or desktop conversation and waits for authenticated connection. The panel dismisses automatically; a local response cancels this unfinished attempt and never approves. A short-lived, process-bound lease associates the subprocess with its panel. It is not pairing authority; only the phone can confirm. Restart loaded Hermes processes after installation or update. Existing phone connections remain compatible. Only `connected` indicates success; expiry and failure exit nonzero. Numeric comparison is the only supported new pairing flow.
 
 In the `hermes-ios` development workspace, run the Python tests, relay tests/typecheck, iOS tests with simulator signing
 enabled (Keychain requires entitlements), and
 `Companion/.venv/bin/python Validation/setup_fixture.py`.
 The fixture uses real Swift/Python crypto and the local Worker, compares both
-codes after capturing the completed CLI output, restarts the service, completes HPKE, reads only fixture messages,
+codes through the panel’s local state after checking that CLI output contains no code, restarts the service, completes HPKE, reads only fixture messages,
 and checks cleanup. It uses no production keys or notifications.
 
 Real notification delivery and background/cold-launch behavior still require a

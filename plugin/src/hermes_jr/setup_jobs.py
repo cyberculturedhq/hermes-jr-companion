@@ -1,10 +1,10 @@
 """Service-owned pairing jobs with bounded, non-streaming command results."""
 from __future__ import annotations
 import asyncio
+import contextlib
 import hashlib
 import time
-import shlex
-import sys
+import json
 import aiohttp
 from . import setup_crypto, __version__
 from .setup_pairing import run, SetupExpired
@@ -18,6 +18,7 @@ TERMINAL = {"connected", "expired", "failed"}
 def initialize(state):
     with state.connect() as db:
         db.execute("CREATE TABLE IF NOT EXISTS setup_jobs (id TEXT PRIMARY KEY, ticket TEXT, name TEXT NOT NULL, status TEXT NOT NULL, code TEXT, expires REAL NOT NULL, updated REAL NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS setup_enrollments (job_id TEXT PRIMARY KEY, device_id TEXT NOT NULL)")
 
 
 def identity(ticket):
@@ -34,7 +35,7 @@ def result(state, job_id):
         status = "expired"
     messages = {
         "pending": "Waiting for the iPhone. Check status again shortly; do not start another attempt.",
-        "ready": "Show this code to the user now. Compare all three groups on the iPhone, then tap It’s correct. Pairing is not complete yet.",
+        "ready": "Compare all three groups in the native pairing panel, then tap It’s correct on the iPhone.",
         "connected": "The iPhone has authenticated and connected. Pairing is complete.",
         "expired": "Pairing expired without completing. Create a fresh setup prompt in Jr.; do not report success.",
         "failed": "Pairing could not be completed. Create a fresh setup prompt in Jr.; do not report success.",
@@ -47,20 +48,11 @@ def result(state, job_id):
         value['instruction'] = 'Say only the user_message; omit commands, versions, paths and JSON.'
     if status == "ready":
         value.update(code=row["code"], expires_at=row["expires"])
-        value['user_message'] = f"Check that {row['code']} matches all three groups in Jr., then tap It’s correct."
-        value['instruction'] = ('Send user_message as a brief progress message, then immediately call terminal '
-                                'with completion_watch.arguments in this same turn. Do not end your turn '
-                                'or ask for a chat reply: confirmation arrives through the watcher. '
-                                'Wait for its result before reporting completion.')
-    if status in {"pending", "ready"}:
-        value["completion_watch"] = {
-            "name": "terminal",
-            "arguments": {"command": shlex.join([sys.executable, "-m", "hermes_jr.cli", "pair", "--watch", job_id]), "timeout": 360}}
     return value
 
 
 async def wait_for_completion(state, job_id):
-    """Read-only bounded waiter; the installing agent shows the code before invoking it."""
+    """Read-only completion observer for protocol validation and internal callers."""
     if len(job_id) != 64 or any(c not in '0123456789abcdef' for c in job_id):
         raise ValueError("Invalid pairing job ID")
     initialize(state)
@@ -76,14 +68,32 @@ async def wait_for_completion(state, job_id):
 
 
 def publish(state, job_id, status, *, code=None, expires_at=None, reason=None):
-    if reason:
-        state.set('setup-failure/' + job_id, reason)
     with state.connect() as db:
-        db.execute("UPDATE setup_jobs SET status=?,code=?,expires=COALESCE(?,expires),updated=?,ticket=CASE WHEN ? THEN NULL ELSE ticket END WHERE id=?",
-                   (status, code, expires_at, time.time(), status in TERMINAL, job_id))
+        db.execute("BEGIN IMMEDIATE")
+        changed = db.execute("UPDATE setup_jobs SET status=?,code=?,expires=COALESCE(?,expires),updated=?,ticket=CASE WHEN ? THEN NULL ELSE ticket END WHERE id=? AND status IN ('pending','ready')",
+                   (status, code, expires_at, time.time(), status in TERMINAL, job_id)).rowcount
+        if changed and reason:
+            db.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('setup-failure/' + job_id, json.dumps(reason)))
+        return bool(changed)
 
 
-async def command(state, service, ticket, name, *, status_only=False, wait_seconds=8):
+def cancel(state, job_id, *, connection=None):
+    """Cancel only this attempt; serialize with completion and device creation."""
+    with (state.connect() if connection is None else contextlib.nullcontext(connection)) as db:
+        if connection is None:
+            db.execute("BEGIN IMMEDIATE")
+        now = time.time()
+        changed = db.execute("UPDATE setup_jobs SET status=CASE WHEN expires<=? THEN 'expired' ELSE 'failed' END,code=NULL,ticket=NULL,updated=? WHERE id=? AND status IN ('pending','ready')",
+                             (now, now, job_id)).rowcount
+        if changed:
+            db.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", ('setup-failure/' + job_id, json.dumps('cancelled')))
+            enrollment = db.execute("SELECT device_id FROM setup_enrollments WHERE job_id=?", (job_id,)).fetchone()
+            if enrollment:
+                state._revoke_in(db, enrollment[0])
+        return bool(changed)
+
+
+async def command(state, service, ticket, name, *, status_only=False, wait_seconds=8, before_start=None):
     initialize(state)
     job_id = identity(ticket)
     existing = result(state, job_id)
@@ -106,7 +116,10 @@ async def command(state, service, ticket, name, *, status_only=False, wait_secon
     intent = setup_crypto.verify_ticket(ticket, issuer["public_key"], state.get("service_url"))
     with state.connect() as db:
         db.execute("BEGIN IMMEDIATE")
+        if before_start:
+            before_start(db)
         db.execute("DELETE FROM setup_jobs WHERE expires < ?", (time.time() - 86400,))
+        db.execute("DELETE FROM setup_enrollments WHERE job_id NOT IN (SELECT id FROM setup_jobs)")
         active = db.execute("SELECT id FROM setup_jobs WHERE status IN ('pending','ready') AND expires > ?", (time.time(),)).fetchone()
         if active and active["id"] != job_id:
             raise ValueError("Another pairing attempt is active. Cancel it in Jr. before starting a new one")
@@ -121,9 +134,12 @@ async def command(state, service, ticket, name, *, status_only=False, wait_secon
 
 
 async def perform(state, service, job):
+    def report(status, **fields):
+        if not publish(state, job['id'], status, **fields):
+            raise SetupFailure('cancelled')
     try:
         await run(state, service, job["ticket"], job["name"],
-                  report=lambda status, **fields: publish(state, job["id"], status, **fields))
+                  report=report, job_id=job['id'])
     except SetupFailure as exc:
         publish(state, job['id'], 'expired' if exc.reason == 'expired' else 'failed', reason=exc.reason)
     except (aiohttp.ClientError, OSError, asyncio.TimeoutError):

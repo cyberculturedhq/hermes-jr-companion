@@ -25,7 +25,7 @@ Read [how notification encryption works](Protocol/NOTIFICATIONS.md) and the [rel
 
 ## Set it up with Hermes
 
-In Jr., tap **Copy setup prompt** and paste it into Hermes. Hermes follows [INSTALL.md](INSTALL.md) to install the plugin and connect your phone. Compare the three code groups shown by Hermes and Jr., then tap **It’s correct**.
+In Jr., tap **Copy setup prompt** and paste it into Hermes. Hermes follows [INSTALL.md](INSTALL.md) to install the plugin and connect your phone. Hermes opens a native pairing panel. Compare its three code groups with Jr., then tap **It’s correct** on your iPhone. The panel closes automatically when connected. After installing or updating the companion, restart your Hermes CLI or quit and reopen Hermes Desktop to load this integration.
 
 Notification permission is optional; reopening Jr. also checks for readiness.
 
@@ -63,7 +63,7 @@ Updates are installed only when you ask. From 0.7.0, the companion verifies a re
 
 ## Phone-bound numeric pairing
 
-The current setup flow requires companion 0.12.0 and the matching iOS app and service updates. Service operators must configure a separate setup signing key and the new temporary-session migration before enabling it.
+The current setup flow requires companion 0.15.0 and the matching iOS app and service updates. Service operators must configure a separate setup signing key and the new temporary-session migration before enabling it.
 
 The [setup protocol](Protocol/SETUP.md) documents its trust boundaries, verification steps, limits, and test coverage. The [service guide](RelayService/README.md#phone-bound-numeric-pairing) covers deployment configuration. This new protocol integration has not had an independent security audit.
 

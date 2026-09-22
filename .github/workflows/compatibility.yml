@@ -59,6 +59,8 @@ jobs:
       - name: Check real Hermes API with mobile adapter
         working-directory: upstream
         run: python ../tools/compatibility/check.py --production-contracts
+      - name: Check native pairing panels with real Hermes renderers
+        run: python tools/compatibility/pairing_panel.py upstream --companion plugin
       - name: Check upstream strict internal contracts
         id: strict_contracts
         continue-on-error: true

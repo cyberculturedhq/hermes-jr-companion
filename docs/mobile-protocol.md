@@ -69,6 +69,29 @@ provider integrations, and every REST response are not exercised by the daily
 upstream probe. The local encrypted integration test separately runs the real
 Swift client through the relay and companion, including both interaction formats.
 
+## Native pairing panels
+
+From companion 0.15.0 the plugin wraps the foreground pairing terminal command
+with execution middleware. A process-bound lease routes it to the originating
+conversation. The native panel reads the code locally, waits for authenticated
+phone completion, and dismisses itself; every local answer cancels the attempt.
+The CLI output contains status only. The phone remains the sole approver.
+
+`pairing_surfaces.py` contains the version-specific adapters for the classic CLI,
+the legacy desktop/TUI question transport, and the newer server-request transport.
+Hermes does not yet expose a public cancellable plugin question handle, so these
+adapters check capabilities and fail closed before starting an unsupported pairing.
+Restart loaded Hermes processes after installing or updating the companion.
+
+The mandatory matrix also runs `tools/compatibility/pairing_panel.py`: real
+execution middleware, the companion CLI subprocess, prompt-toolkit rendering
+and Enter cancellation, and the actual desktop gateway request registry. It
+checks code visibility, originating conversation, phone-only completion,
+automatic dismissal, and lease cleanup. State is disposable, outbound network
+is blocked, and the selected upstream revision is verified. This is a renderer
+and transport test; it does not launch Electron or call a model. The encrypted
+Swift/local Worker fixture separately verifies the actual pairing exchange.
+
 ## When a check fails
 
 Enable **Actions → Email → Only notify for failed workflows** in your GitHub

@@ -1,3 +1,9 @@
+## 0.15.0
+
+- Display pairing codes directly in Hermes' native CLI/TUI and desktop question interfaces. The plugin owns waiting and dismissal; code display no longer depends on model output or reasoning visibility.
+- Keep confirmation on the iPhone. Cancelling the native panel stops only the unfinished attempt; completion and cancellation are serialized with enrollment.
+- Refuse pairing before a native panel is available. Newly installed or updated plugins require reopening the interactive Hermes session. Existing connections and profile choices remain intact.
+
 ## 0.14.0
 
 - Correct Linux systemd working-directory syntax and repair the exact older backend definition; validate generated units with systemd itself.
