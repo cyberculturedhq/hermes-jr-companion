@@ -8,7 +8,7 @@ export type CompanionRelease = { schema: 1; version: string; commit: string; sig
 async function githubJson(path: string, limit: number): Promise<any> {
   const response = await fetch(api + path, {
     headers: { Accept: "application/vnd.github+json", "User-Agent": "hermes-jr-companion-release-feed" },
-    redirect: "error", signal: AbortSignal.timeout(8000),
+    redirect: "manual", signal: AbortSignal.timeout(8000),
   });
   if (!response.ok || !response.body || Number(response.headers.get("Content-Length") ?? 0) > limit)
     throw new Error("release_unavailable");
