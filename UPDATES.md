@@ -29,7 +29,7 @@ hermes jr update --install
 hermes jr doctor
 ```
 
-The installer verifies a stable release and pins its commit, uses Hermes’ native plugin scanner, checks installed profile copies for local changes, and builds the candidate before replacing anything. It saves the current Python package and profile copies, preserves enabled/disabled settings, and restarts the managed bridge if it was running. Loaded Hermes processes still need a restart when idle to use the new hooks.
+The installer verifies a stable release and pins its commit, uses Hermes’ native plugin scanner, and checks installed profile copies for local changes before replacing anything. It saves the plugin copies and their installation metadata, preserves enabled/disabled settings, and lets Hermes' package manager select the pinned Python package from PyPI. It restarts the managed bridge if it was running. Loaded Hermes processes still need a restart when idle to use the new hooks.
 
 If installation, validation, or bridge startup fails, it restores the previous code automatically. Pairings, follows, and conversation state are never restored from an old snapshot.
 
@@ -39,7 +39,7 @@ To undo the most recent managed update:
 hermes jr rollback
 ```
 
-Rollback refuses to overwrite subsequent local code changes. Backups and private logs are kept under the companion state directory in `update-backups`; `last-update.json` identifies the latest backup. If the package cannot start, run the saved standalone recovery helper with the Hermes Python executable:
+Rollback refuses to overwrite subsequent local code changes. Backups and private logs are kept under the companion state directory in `update-backups`; `last-update.json` identifies the latest backup. If the package cannot start, run the saved standalone recovery helper with Hermes' currently selected Python executable. It restores plugin files and asks Hermes' package manager to select their previous pinned package:
 
 ```sh
 /path/to/hermes/python /path/to/update-backups/BACKUP_ID/recover.py
@@ -49,13 +49,15 @@ Then restart loaded Hermes processes when idle and run `hermes jr doctor`. Keep 
 
 ## Updating an older companion
 
-If an older updater refuses a release that removes an unused dependency, download the current `install.py` as shown in [INSTALL.md](INSTALL.md) and run it with `--update`, only for an explicitly requested update when Hermes work is idle. It loads the signed release's managed updater, preserves profile activation choices, and uses the same `hermes jr rollback` record and automatic recovery. Normal setup without `--update` never upgrades an installed companion.
+For installations before 0.17.0, stop Hermes Jr. and finish active Hermes work. Move every old `plugins/hermes-jr` directory out of the Hermes home (the default profile and each named profile) into a private backup, then finish the pending Hermes Agent update. The old plugin directory contains a `pyproject.toml`; multiple enabled copies cause Hermes' new package manager to reject the shared workspace, so individual profile removals can fail until the duplicate set is gone. Keep the profile installation metadata and companion state in place. Once Hermes updates, use the current [INSTALL.md](INSTALL.md) procedure to install the newly released plugin across profiles, and run `hermes jr doctor`. Do not delete companion state or pairings unless you intend to reset them.
 
-Removed requirements leave shared packages installed. Added or changed requirements, local source edits, and unsupported layouts stop before replacement; report the specific constraint rather than overwriting the user's setup. Diagnose connection failures with [STARTUP.md](STARTUP.md), not a reinstall.
+For later releases, download the current `install.py` as shown in [INSTALL.md](INSTALL.md) and run it with `--update` only for an explicitly requested update when Hermes work is idle. It loads the signed release's managed updater, preserves profile activation choices, and uses the same `hermes jr rollback` record and automatic recovery. Normal setup without `--update` never upgrades an installed companion.
+
+Hermes' package manager resolves changed requirements across every enabled profile. Conflicting pins, local source edits, and unsupported layouts stop before replacement; report the specific constraint rather than overwriting the user's setup. Diagnose connection failures with [STARTUP.md](STARTUP.md), not a reinstall.
 
 ## Limits and release policy
 
-Managed updates support standard, unmodified native installations using the official `.git#plugin` source. Forks, editable installs, linked directories, added or changed dependency requirements, and protocol/state migrations need release-specific manual instructions. The updater does not change shared dependencies or silently migrate data.
+Managed updates support standard, unmodified native installations using the official `.git#plugin` source and Hermes' package manager. Forks, editable installs, linked directories, all-disabled copies, dependency conflicts with other plugins, and protocol/state migrations need release-specific manual instructions. The updater does not silently migrate data.
 
 Checks use stable `vMAJOR.MINOR.PATCH` GitHub releases, not development `main`. The hosted feed contains only a signed version and commit; no device identifiers or model prompts. GitHub receives the host’s network address and a generic user agent, but no pairing or Hermes credentials. Failed checks do not interrupt the bridge. The legacy host notice expires after seven days without a successful check. Guided receipts expire after one day if they have not started and are retained for at most seven days.
 
@@ -67,7 +69,10 @@ Starting with 0.7.0, update checks and installation verify an Ed25519 signature
 using a public key pinned in the installed plugin. The signed message binds the
 repository, stable version and exact Git commit. A changed tag, unsigned release,
 wrong signing key or altered version is rejected before the native installer or
-package build executes. Updating remains an explicit user action.
+package manager acts. The pinned package is published separately to PyPI from
+the same tag by GitHub Actions with PyPI trusted publishing; the release
+signature binds the plugin commit, while PyPI and that workflow provide the
+package distribution. Updating remains an explicit user action.
 
 The first installation still trusts the repository you choose. Signatures do not
 make a malicious maintainer safe, and users must keep the pinned verification
@@ -80,8 +85,9 @@ with mode 0600. After the release commit passes CI and merges, run:
 python tools/sign_release.py --key /private/path/release-ed25519.pem --version VERSION --commit COMMIT
 ```
 
-Include the resulting HTML comment unchanged in the GitHub release body, and
-create its `vVERSION` tag at that exact commit. The release-feed workflow validates that signature and attaches `companion-release.json`; it has no private signing key. Tag rules prevent later moves and
+Create the `vVERSION` tag at that exact commit, wait for the PyPI publishing
+workflow to succeed and confirm the package is available on PyPI, then include
+the resulting HTML comment unchanged in the GitHub release body. The release-feed workflow validates that signature and attaches `companion-release.json`; it has no private signing key. Tag rules prevent later moves and
 deletion. Keep a secure backup of the private key. Key rotation requires a release
 signed by the currently trusted key that ships the next trusted public key;
 losing that key requires a clearly communicated manual reinstall. A GitHub
@@ -91,6 +97,6 @@ losing that key requires a clearly communicated manual reinstall. A GitHub
 
 Revoke each phone with `PYTHON -m hermes_jr.cli revoke DEVICE_UUID`, then uninstall the companion service. If setup created a dedicated backend, remove it with `PYTHON -m hermes_jr.cli backend uninstall`. Preserve any pre-existing Hermes supervisor.
 
-Disable and remove the native plugin in each installed profile, then uninstall only the `hermes-jr-companion` Python distribution. Leave shared dependencies installed and run `pip check`. Companion state survives routine updates and uninstall. For a clean reinstall, remove only companion-specific state after revocation and service removal. Preserve conversations, model settings, and the Hermes pairing subsystem.
+Disable and remove the native plugin in each installed profile. Hermes' package manager then removes its requirement from the shared environment; do not use `pip` to modify that environment. Companion state survives routine updates and uninstall. For a clean reinstall, remove only companion-specific state after revocation and service removal. Preserve conversations, model settings, and the Hermes pairing subsystem.
 
 End any conversation still running old plugin callbacks before checking removal or starting a clean-install test.

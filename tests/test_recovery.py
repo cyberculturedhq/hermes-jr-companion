@@ -1,13 +1,11 @@
-from email.message import Message
-import json
 from pathlib import Path
+import sys
 import tempfile
 import types
 import unittest
 from unittest.mock import patch
-import zipfile
+from hermes_jr import recovery
 from hermes_jr.recovery import Snapshot, digest
-from hermes_jr.installer import validate_wheel
 
 
 class RecoveryTests(unittest.TestCase):
@@ -81,20 +79,20 @@ class RecoveryTests(unittest.TestCase):
         Snapshot(self.root/'backup').restore(check_current=False)
         self.assertEqual((self.package/'code.py').read_text(),'old code')
 
-    def wheel(self, *, requirement='aiohttp<4,>=3.12', extra=None, entry='hermes-jr = hermes_jr.cli:main'):
-        wheel=self.root/'candidate.whl';prefix='hermes_jr_companion-0.4.0.dist-info'
-        with zipfile.ZipFile(wheel,'w') as z:
-            z.writestr(prefix+'/METADATA',f'Name: hermes-jr-companion\nVersion: 0.4.0\nRequires-Dist: {requirement}\n')
-            z.writestr(prefix+'/WHEEL','Root-Is-Purelib: true\n')
-            z.writestr(prefix+'/entry_points.txt','[console_scripts]\n'+entry+'\n')
-            z.writestr('hermes_jr/__init__.py','')
-            if extra:z.writestr(extra,'unexpected')
-        metadata=Message();metadata['Requires-Dist']='aiohttp<4,>=3.12'
-        return wheel,types.SimpleNamespace(metadata=metadata)
-
-    def test_wheel_guards_package_and_dependency_ownership(self):
-        wheel,dist=self.wheel()
-        self.assertEqual(validate_wheel(wheel,'0.4.0',dist),'hermes_jr_companion-0.4.0.dist-info')
-        for changes in ({'extra':'other_package/a.py'},{'extra':'hermes_jr/../../bad'},{'requirement':'aiohttp>=99'},{'entry':'other-command = hermes_jr.cli:main'}):
-            wheel,dist=self.wheel(**changes)
-            with self.assertRaises(ValueError):validate_wheel(wheel,'0.4.0',dist)
+    def test_emergency_recovery_reselects_previous_pm_package(self):
+        snapshot = Snapshot.create(self.root/'backup', [self.profile],
+                                   state_directory=str(self.root),
+                                   enabled_homes=[str(self.root)])
+        (self.profile/'plugin.yaml').write_text('new manifest')
+        snapshot.complete()
+        envs = types.ModuleType('pm.environments')
+        envs.project_python = lambda _: Path('/hermes/python')
+        main = types.ModuleType('hermes_cli.main')
+        main.PROJECT_ROOT = self.root
+        with patch.object(recovery, '__file__', str(snapshot.directory/'recover.py')), \
+             patch.object(recovery.subprocess, 'run', return_value=types.SimpleNamespace(returncode=0)) as run, \
+             patch.dict(sys.modules, {'pm': types.ModuleType('pm'), 'pm.environments': envs,
+                                      'hermes_cli': types.ModuleType('hermes_cli'), 'hermes_cli.main': main}):
+            recovery.emergency_recover()
+        self.assertEqual((self.profile/'plugin.yaml').read_text(), 'old manifest')
+        self.assertEqual([call.args[0][4] for call in run.call_args_list], ['disable', 'enable'])

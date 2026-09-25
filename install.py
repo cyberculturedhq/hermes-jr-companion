@@ -11,7 +11,6 @@ import re
 import shutil
 import subprocess
 import sys
-import sysconfig
 import tempfile
 import time
 import urllib.request
@@ -20,7 +19,7 @@ REPO = 'cyberculturedhq/hermes-jr-companion'
 SOURCE = 'https://github.com/' + REPO + '.git#plugin'
 API = 'https://api.github.com/repos/' + REPO
 PUBLIC_KEY = 'ac072d31db546d1f241ac1ace40cb0b474bd4e833d78385cb9f03499e44778af'
-MINIMUM = (0, 15, 0)
+RELEASE_MINIMUM = (0, 17, 0)
 
 
 def version(value):
@@ -30,7 +29,18 @@ def version(value):
 
 
 def hermes_python():
-    candidates = [os.environ.get('HERMES_PYTHON'), sys.executable]
+    candidates = [os.environ.get('HERMES_PYTHON')]
+    # Hermes PM retires the in-tree venv after selecting an isolated generation.
+    # Its facts file is the authoritative pointer for an installed checkout.
+    for facts in sorted((Path.home() / '.hermes/installs').glob('*/facts.json')):
+        try:
+            environment = json.loads(facts.read_text())['packages']['venv']['environment']
+            path = Path(environment).resolve()
+            if path.is_relative_to((facts.parent / 'environments').resolve()):
+                candidates.append(str(path / 'bin/python'))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    candidates.append(sys.executable)
     executable = shutil.which('hermes')
     if executable:
         candidates.append(str(Path(executable).parent / 'python'))
@@ -64,7 +74,7 @@ def release():
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     data = get_json('/releases/latest')
     tag = data['tag_name']
-    if data.get('draft') or data.get('prerelease') or version(tag) < MINIMUM:
+    if data.get('draft') or data.get('prerelease') or version(tag) < RELEASE_MINIMUM:
         raise ValueError('The required stable release is not published yet. Keep the current installation.')
     obj = get_json('/git/ref/tags/' + tag)['object']
     for _ in range(4):
@@ -87,13 +97,8 @@ def release():
 
 
 def profiles():
-    from hermes_constants import get_default_hermes_root, get_hermes_home, named_profile_is_deleted
-    root = get_default_hermes_root().resolve()
-    homes = [root, get_hermes_home().resolve()]
-    if (root / 'profiles').is_dir():
-        homes += [p for p in sorted((root / 'profiles').iterdir())
-                  if p.is_dir() and re.fullmatch('[a-z0-9][a-z0-9_.-]*', p.name) and not named_profile_is_deleted(p)]
-    homes = list(dict.fromkeys(homes))
+    from pm.plugins_state import dependency_homes
+    homes = list(dict.fromkeys(home.resolve() for home in dependency_homes()))
     if any(p.is_symlink() or (p / 'plugins/hermes-jr').is_symlink() for p in homes):
         raise ValueError('Linked profile/plugin directories require an explicit manual installation.')
     return homes
@@ -115,7 +120,7 @@ def inspect(command):
 
 def reuse(installed):
     # No GitHub access, package replacement, profile activation or service restart.
-    if version(installed) < MINIMUM:
+    if version(installed) < (0, 15, 0):
         raise ValueError('Native pairing panels require companion 0.15.0 or newer. Follow UPDATES.md for an explicit update, then reopen the interactive Hermes session. Existing connections are unchanged; do not reinstall as a generic repair.')
     health = inspect(['doctor'])
     manager = inspect(['service', 'status'])
@@ -147,6 +152,12 @@ def install(update=False, receipt=None):
     target, commit = selected['latest'], selected['commit']
     if installed and version(installed) >= version(target) and not receipt:
         return reuse(installed)
+    from hermes_cli.main import PROJECT_ROOT
+    from pm.environments import project_python
+    from pm.plugin_declarations import read_python_declaration
+
+    def current_python():
+        return str(project_python(PROJECT_ROOT))
     homes = profiles()
     from hermes_constants import get_default_hermes_root
     backups = get_default_hermes_root() / 'backups/hermes-jr-installer'
@@ -162,7 +173,7 @@ def install(update=False, receipt=None):
         if home is not None:
             env['HERMES_HOME'] = str(home)
         with log.open('ab') as output:
-            result = subprocess.run([sys.executable, *args], env=env, stdout=subprocess.PIPE if capture else output,
+            result = subprocess.run([current_python(), *args], env=env, stdout=subprocess.PIPE if capture else output,
                                     stderr=output, timeout=300)
         if result.returncode:
             raise ValueError('Installation command failed. Inspect the private log: ' + str(log))
@@ -171,13 +182,15 @@ def install(update=False, receipt=None):
     def native(home):
         run(['-m', 'hermes_cli.main', 'plugins', 'install', SOURCE, '--ref', commit, '--force', '--no-enable'], home)
 
-    # Native scanning and wheel preparation happen before replacing any installed code.
+    # Scan the signed plugin before changing an installed profile.
     stage = work / 'stage'; stage.mkdir(mode=0o700)
     native(stage)
     candidate = stage / 'plugins/hermes-jr'
     manifest = (candidate / 'plugin.yaml').read_text()
     if not re.search(r'^version:\s*[\"\']?' + re.escape(target) + r'[\"\']?\s*$', manifest, re.M):
         raise ValueError('Native plugin version does not match the signed release.')
+    if (candidate / 'pyproject.toml').exists() or read_python_declaration(candidate).install_requirements != (f'hermes-jr-companion=={target}',):
+        raise ValueError('Native plugin does not pin the signed release package through Hermes PM.')
     if installed:
         # All explicit upgrades use the same managed updater and rollback record.
         # Load the verified candidate in a separate process so old updater versions
@@ -196,38 +209,32 @@ def install(update=False, receipt=None):
                           'message': 'The companion was updated. Existing profile choices and pairings were preserved.',
                           'next_step': 'Restart loaded Hermes sessions when idle, as described in UPDATES.md. Pairing is a separate action.'}), flush=True)
         return
-    wheels = work / 'wheels'
-    constraints = work / 'constraints.txt'
-    constraints.write_text('\n'.join(sorted({d.metadata['Name'] + '==' + d.version for d in importlib.metadata.distributions()
-                                           if d.metadata['Name'] and d.metadata['Name'].lower().replace('_', '-') != 'hermes-jr-companion'})))
-    run(['-m', 'pip', 'wheel', str(candidate), '--constraint', str(constraints), '--wheel-dir', str(wheels)])
-    own = list(wheels.glob('hermes_jr_companion-*.whl'))
-    if len(own) != 1 or not own[0].name.startswith('hermes_jr_companion-' + target + '-'):
-        raise ValueError('Built package does not match the release.')
     # Recovery helper is from the native-scanned, signed candidate, and uses only stdlib.
     spec = importlib.util.spec_from_file_location('jr_recovery', candidate / 'src/hermes_jr/recovery.py')
     recovery = importlib.util.module_from_spec(spec); spec.loader.exec_module(recovery)
-    site = Path(sysconfig.get_path('purelib'))
-    resources = [site / 'hermes_jr', site / ('hermes_jr_companion-' + target + '.dist-info'),
-                 Path(sysconfig.get_path('scripts')) / 'hermes-jr']
-    resources += [p for home in homes for p in (home / 'plugins/hermes-jr', home / 'plugins/.install-metadata.json')]
+    resources = [p for home in homes for p in (home / 'plugins/hermes-jr', home / 'plugins/.install-metadata.json')]
     snapshot = recovery.Snapshot.create(work / 'before', resources)
     # Preserve all existing files (including locally changed/legacy layouts) in that private backup.
     try:
         snapshot.ensure_unchanged('before')
         for home in homes:
             native(home)
-        run(['-m', 'pip', 'install', '--no-index', '--find-links', str(wheels), '--constraint', str(constraints), str(own[0])])
-        run(['-m', 'pip', 'install', '--no-deps', '--force-reinstall', str(own[0])])
-        run(['-m', 'pip', 'check'])
+        for home in homes:
+            run(['-m', 'hermes_cli.main', 'plugins', 'enable', 'hermes-jr'], home)
+        selected_version = run(['-I', '-c', 'import importlib.metadata; print(importlib.metadata.version("hermes-jr-companion"))'], capture=True).strip()
+        if selected_version != target:
+            raise ValueError('Hermes PM did not select the signed companion version.')
         for home in homes:
             run(['-m', 'hermes_cli.main', 'plugins', 'doctor', str(home / 'plugins/hermes-jr'), '--ci'], home)
         snapshot.complete()
     except BaseException:
+        for home in homes:
+            try:
+                run(['-m', 'hermes_cli.main', 'plugins', 'disable', 'hermes-jr'], home)
+            except BaseException:
+                pass
         snapshot.restore(check_current=False)
         raise
-    for home in homes:
-        run(['-m', 'hermes_cli.main', 'plugins', 'enable', 'hermes-jr', '--no-allow-tool-override'], home)
     # New subprocesses import the installed package, never the previous in-memory version.
     state = json.loads(run(['-m', 'hermes_jr.cli', 'status'], capture=True))
     if not state.get('service_url'):
@@ -245,7 +252,7 @@ def install(update=False, receipt=None):
     for _ in range(15):
         health = json.loads(run(['-m', 'hermes_jr.cli', 'doctor'], capture=True))
         if health.get('installation', {}).get('status') == 'consistent' and health.get('service') == 'ok' and health.get('dashboard_rpc') == 'ok':
-            print(json.dumps({'status': 'ready', 'version': target, 'python': sys.executable,
+            print(json.dumps({'status': 'ready', 'version': target, 'python': current_python(),
                               'next_step': HANDOFF}), flush=True)
             return
         time.sleep(1)

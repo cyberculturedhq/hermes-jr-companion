@@ -28,7 +28,10 @@ sys.meta_path[:] = [finder for finder in sys.meta_path
 sys.path[:] = [path for path in sys.path if not path.startswith('__editable__.hermes_agent')]
 plugin = args.companion.resolve()
 args.upstream = args.upstream.resolve()
-home = tempfile.TemporaryDirectory(prefix='jr-panel-runtime-')
+# Current Hermes may still be staging its optional Python tool after the
+# renderer exits. Its background copy can race fixture teardown on CI; the
+# runner discards this isolated temporary tree after the job.
+home = tempfile.TemporaryDirectory(prefix='jr-panel-runtime-', ignore_cleanup_errors=True)
 os.environ['HERMES_HOME'] = home.name
 os.environ['HERMES_TEST_ISOLATION'] = '1'
 os.environ['HERMES_JR_STATE_DIR'] = str(Path(home.name) / 'jr-state')
