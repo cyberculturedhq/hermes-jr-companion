@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turn an authorized release into the small public update feed asset."""
+"""Validate a signed release and render the small public update feed payload."""
 import argparse
 import json
 import sys
