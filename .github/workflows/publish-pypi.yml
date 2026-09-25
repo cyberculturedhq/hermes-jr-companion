@@ -1,0 +1,57 @@
+name: Publish Python package
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: false
+      - name: Check release identity
+        run: |
+          python - <<'PY'
+          import os, pathlib, re, tomllib
+          tag = os.environ['GITHUB_REF_NAME']
+          version = tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version']
+          manifest = pathlib.Path('plugin/plugin.yaml').read_text()
+          assert tag == 'v' + version
+          assert re.search(r'^version: ' + re.escape(version) + r'$', manifest, re.M)
+          assert f'hermes-jr-companion=={version}' in manifest
+          assert not pathlib.Path('plugin/pyproject.toml').exists()
+          PY
+      - run: uv build
+      - name: Smoke test wheel
+        run: uv run --isolated --no-project --with dist/*.whl python -c 'import importlib.metadata, os; from hermes_jr import cli, daemon; assert importlib.metadata.version("hermes-jr-companion") == os.environ["GITHUB_REF_NAME"].removeprefix("v")'
+      - name: Smoke test source distribution
+        run: uv run --isolated --no-project --with dist/*.tar.gz python -c 'import importlib.metadata, os; from hermes_jr import cli, daemon; assert importlib.metadata.version("hermes-jr-companion") == os.environ["GITHUB_REF_NAME"].removeprefix("v")'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: astral-sh/attest-action@f589a42a7efb6fe400b4f400de60b4bc90390027 # v0.0.6
+      - run: uv publish --trusted-publishing always

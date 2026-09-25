@@ -93,7 +93,7 @@ class Snapshot:
                     raise ValueError('An update target changed while creating its backup')
             records.append({'path': str(path), 'backup': str(i), 'before': before})
         write_json(directory / 'journal.json', {'phase': 'prepared', 'resources': records, **details})
-        # Recovery must not depend on the package remaining importable after a failed pip run.
+        # Recovery must remain available when the managed package cannot be imported.
         shutil.copy2(__file__, directory / 'recover.py')
         return cls(directory)
 
@@ -161,11 +161,33 @@ def emergency_recover():
         phase = snapshot.journal['phase']
         if phase == 'prepared':
             raise ValueError('This update never replaced installed files')
-        if phase == 'rolled_back':
-            print('This backup has already been restored.')
-            return
-        snapshot.restore(check_current=phase == 'complete')
-    print('Previous companion restored. Start its service and run hermes jr doctor. Pairings and private state were preserved.')
+        homes = snapshot.journal.get('enabled_homes')
+        if homes is None:
+            raise ValueError('This backup predates Hermes package manager recovery')
+        if phase == 'complete':
+            snapshot.ensure_unchanged('after')
+        # Remove active members before restoring source, then ask Hermes PM to
+        # resolve the restored manifests. A file-only restore leaves the selected
+        # environment at the newer package version.
+        from hermes_cli.main import PROJECT_ROOT
+        from pm.environments import project_python
+        def hermes(home, action):
+            env = os.environ.copy()
+            env['HERMES_HOME'] = str(home)
+            env.pop('PYTHONPATH', None)
+            env.pop('PYTHONHOME', None)
+            result = subprocess.run([str(project_python(PROJECT_ROOT)), '-m', 'hermes_cli.main',
+                                     'plugins', action, 'hermes-jr'], env=env,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300)
+            if result.returncode:
+                raise ValueError('Hermes PM could not restore the previous selection')
+        if phase != 'rolled_back':
+            for home in homes:
+                hermes(home, 'disable')
+            snapshot.restore(check_current=False)
+        for home in homes:
+            hermes(home, 'enable')
+    print('Previous companion restored through Hermes PM. Start its service and run hermes jr doctor. Pairings and private state were preserved.')
 
 
 if __name__ == '__main__':

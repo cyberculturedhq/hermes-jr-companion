@@ -117,7 +117,7 @@ def run_tracked(state, release, receipt):
 
 
 def _run_tracked(state, release, receipt):
-    from .installer import install, verify_connection
+    from .installer import install, managed_version, verify_connection
     from .release_signature import verify
     verify(release)
     value = decode(receipt)
@@ -129,10 +129,11 @@ def _run_tracked(state, release, receipt):
     with state.connect() as db:
         db.execute("UPDATE update_requests SET status='running',error=NULL WHERE id=?", (value['id'],))
     try:
-        if version(installed_version()) < version(release['latest']):
+        current = managed_version() or installed_version()
+        if version(current) < version(release['latest']):
             install(state, release, receipt_id=value['id'])
         verify_connection(state)
-        complete(state, value['id'], installed_version())
+        complete(state, value['id'], managed_version() or installed_version())
     except BaseException:
         with state.connect() as db:
             db.execute("UPDATE update_requests SET status='failed',error='The update did not complete. Open its conversation for details.' WHERE id=? AND status!='completed'", (value['id'],))

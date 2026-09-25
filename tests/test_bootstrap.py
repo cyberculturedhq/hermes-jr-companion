@@ -40,6 +40,22 @@ class BootstrapTests(unittest.TestCase):
             self.assertTrue(Path(path).is_absolute())
             self.assertIn('import hermes_cli', run.call_args.args[0][-1])
 
+    def test_python_discovery_reads_selected_pm_generation(self):
+        import json, tempfile
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            facts = root / '.hermes/installs/fixture/facts.json'
+            facts.parent.mkdir(parents=True)
+            selected = facts.parent / 'environments/generation/venv'
+            python = selected / 'bin/python'
+            python.parent.mkdir(parents=True)
+            python.touch()
+            facts.write_text(json.dumps({'packages': {'venv': {'environment': str(selected)}}}))
+            with patch.object(bootstrap.Path, 'home', return_value=root), \
+                 patch.object(bootstrap.subprocess, 'run') as run:
+                run.return_value.returncode = 0
+                self.assertEqual(bootstrap.hermes_python(), str(python.resolve()))
+
     def test_repair_or_pairing_never_downloads_or_changes_existing_code(self):
         health = {'installation': {'status': 'consistent'}, 'service': 'ok', 'dashboard_rpc': 'ok'}
         with patch.object(bootstrap.importlib.metadata, 'version', return_value='0.15.0'), \
@@ -71,6 +87,13 @@ class BootstrapTests(unittest.TestCase):
         import contextlib,io,json,sys,tempfile,types
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
+            pm = types.ModuleType('pm')
+            envs = types.ModuleType('pm.environments')
+            envs.project_python = lambda _: Path(sys.executable)
+            declarations = types.ModuleType('pm.plugin_declarations')
+            declarations.read_python_declaration = lambda _: types.SimpleNamespace(install_requirements=('hermes-jr-companion==0.15.0',))
+            main = types.ModuleType('hermes_cli.main')
+            main.PROJECT_ROOT = root
             def command(args, **kwargs):
                 if 'plugins' in args and 'install' in args:
                     candidate = Path(kwargs['env']['HERMES_HOME']) / 'plugins/hermes-jr'
@@ -79,7 +102,8 @@ class BootstrapTests(unittest.TestCase):
                 return types.SimpleNamespace(returncode=0, stdout=b'')
             constants = types.SimpleNamespace(get_default_hermes_root=lambda:root)
             output=io.StringIO()
-            with patch.dict(sys.modules, {'hermes_constants':constants}), \
+            with patch.dict(sys.modules, {'hermes_constants':constants, 'hermes_cli.main':main,
+                                          'pm':pm, 'pm.environments':envs, 'pm.plugin_declarations':declarations}), \
                  patch.object(bootstrap.importlib.metadata,'version',return_value='0.14.0'), \
                  patch.object(bootstrap,'release',return_value={'latest':'0.15.0','commit':'a'*40,'signature':'fixture','state':'available'}), \
                  patch.object(bootstrap,'profiles',return_value=[]), \
@@ -96,7 +120,14 @@ class BootstrapTests(unittest.TestCase):
     def test_fresh_install_reaches_supervised_startup_and_ready(self):
         import contextlib,io,json,shutil,sys,tempfile,types
         with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp);home=root/'home';home.mkdir();site=root/'site';site.mkdir();scripts=root/'bin';scripts.mkdir()
+            root=Path(temp);home=root/'home';home.mkdir()
+            pm = types.ModuleType('pm')
+            envs = types.ModuleType('pm.environments')
+            envs.project_python = lambda _: Path(sys.executable)
+            declarations = types.ModuleType('pm.plugin_declarations')
+            declarations.read_python_declaration = lambda _: types.SimpleNamespace(install_requirements=('hermes-jr-companion==0.15.0',))
+            main = types.ModuleType('hermes_cli.main')
+            main.PROJECT_ROOT = root
             recovery_source=repo/'plugin/src/hermes_jr/recovery.py' if (repo/'plugin').exists() else repo/'src/hermes_jr/recovery.py'
             def command(args, **kwargs):
                 output=b''
@@ -105,8 +136,8 @@ class BootstrapTests(unittest.TestCase):
                     (candidate/'plugin.yaml').write_text('version: 0.15.0\n')
                     (candidate/'src/hermes_jr').mkdir(parents=True,exist_ok=True)
                     shutil.copy2(recovery_source,candidate/'src/hermes_jr/recovery.py')
-                elif 'wheel' in args:
-                    wheels=Path(args[-1]);wheels.mkdir();(wheels/'hermes_jr_companion-0.15.0-py3-none-any.whl').touch()
+                elif args[1:3]==['-I','-c']:
+                    output=b'0.15.0\n'
                 elif args[1:3]==['-m','hermes_jr.cli']:
                     action=args[3:]
                     values={('status',):{'service_url':'https://fixture.test','relay_enabled':True},
@@ -117,12 +148,11 @@ class BootstrapTests(unittest.TestCase):
                 return types.SimpleNamespace(returncode=0,stdout=output)
             constants=types.SimpleNamespace(get_default_hermes_root=lambda:root)
             output=io.StringIO()
-            with patch.dict(sys.modules,{'hermes_constants':constants}), \
+            with patch.dict(sys.modules,{'hermes_constants':constants, 'hermes_cli.main':main,
+                                         'pm':pm, 'pm.environments':envs, 'pm.plugin_declarations':declarations}), \
                  patch.object(bootstrap.importlib.metadata,'version',side_effect=bootstrap.importlib.metadata.PackageNotFoundError), \
-                 patch.object(bootstrap.importlib.metadata,'distributions',return_value=[]), \
                  patch.object(bootstrap,'release',return_value={'latest':'0.15.0','commit':'a'*40,'signature':'fixture','state':'available'}), \
                  patch.object(bootstrap,'profiles',return_value=[home]), \
-                 patch.object(bootstrap.sysconfig,'get_path',side_effect=lambda kind:str(site if kind=='purelib' else scripts)), \
                  patch.object(bootstrap.subprocess,'run',side_effect=command) as run, contextlib.redirect_stdout(output):
                 bootstrap.install()
             self.assertEqual(json.loads(output.getvalue().splitlines()[-1])['status'],'ready')

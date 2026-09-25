@@ -1,29 +1,34 @@
-"""Explicit stable-release installation with code-only rollback and native Hermes scanning."""
+"""Signed companion updates through Hermes' managed plugin environment."""
 from __future__ import annotations
-import configparser
-import importlib.metadata
+
 import json
 import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
-import sys
-import sysconfig
 import tempfile
 import uuid
-import zipfile
-from email.parser import BytesParser
-from .recovery import Snapshot, lock, write_json
-from .supervisor import Supervisor, bridge_running
-from .updates import REPOSITORY, installed_version, version
 
-SOURCE = 'https://github.com/' + REPOSITORY
-PLUGIN_SOURCE = SOURCE + '.git#plugin'
+from .recovery import Snapshot, lock, write_json
+from .supervisor import Supervisor, private_write
+from .updates import REPOSITORY, version
+
+PLUGIN_SOURCE = 'https://github.com/' + REPOSITORY + '.git#plugin'
 POLICY = {'protocol_version': 1, 'state_schema': 1}
 
 
-def run(args, *, home=None, log=None, cwd=None):
+def managed_python():
+    """Re-read the selected interpreter after each PM publication."""
+    try:
+        from hermes_cli.main import PROJECT_ROOT
+        from pm.environments import project_python
+        return str(project_python(PROJECT_ROOT))
+    except ImportError:
+        raise ValueError('This companion release requires Hermes package manager') from None
+
+
+def run(args, *, home=None, log=None):
     env = os.environ.copy()
     env.pop('PYTHONPATH', None)
     env.pop('PYTHONHOME', None)
@@ -31,31 +36,29 @@ def run(args, *, home=None, log=None, cwd=None):
         env['HERMES_HOME'] = str(home)
     try:
         with open(log or os.devnull, 'ab') as output:
-            result = subprocess.run(args, cwd=cwd, env=env, stdout=output, stderr=output, timeout=300)
+            result = subprocess.run(args, env=env, stdout=output, stderr=output, timeout=300)
     except (OSError, subprocess.TimeoutExpired):
         raise ValueError('An update command could not finish; see the private update log') from None
     if result.returncode:
         raise ValueError('An update command failed; see the private update log')
 
 
+def hermes(home, log, *args):
+    run([managed_python(), '-m', 'hermes_cli.main', *args], home=home, log=log)
+
+
 def native_install(home, commit, log):
-    run([sys.executable, '-m', 'hermes_cli.main', 'plugins', 'install', PLUGIN_SOURCE,
-         '--ref', commit, '--force', '--no-enable'], home=home, log=log)
+    hermes(home, log, 'plugins', 'install', PLUGIN_SOURCE,
+           '--ref', commit, '--force', '--no-enable')
 
 
 def installed_profiles():
     try:
-        from hermes_constants import get_default_hermes_root, get_hermes_home, named_profile_is_deleted
+        from pm.plugins_state import dependency_homes
     except ImportError:
-        raise ValueError('Run this command using the Python environment that runs Hermes') from None
-    root = get_default_hermes_root().resolve()
-    homes = list(dict.fromkeys([root, Path(get_hermes_home())]))
-    if (root / 'profiles').is_dir():
-        homes += sorted(p for p in (root / 'profiles').iterdir()
-                        if p.is_dir() and re.fullmatch(r'[a-z0-9][a-z0-9_.-]*', p.name)
-                        and not named_profile_is_deleted(p))
+        raise ValueError('This companion release requires Hermes package manager') from None
     found = []
-    for home in homes:
+    for home in dependency_homes():
         plugin = home / 'plugins/hermes-jr'
         if not plugin.exists():
             continue
@@ -74,9 +77,17 @@ def installed_profiles():
     return found
 
 
+def active_homes(profiles):
+    from pm.workspace import enabled_plugin_dirs
+    active = {path.resolve() for path in enabled_plugin_dirs()}
+    known = {plugin.resolve() for _, plugin, _ in profiles}
+    if any(path.name == 'hermes-jr' and path not in known for path in active):
+        raise ValueError('An enabled Hermes Jr copy is outside the managed profile set')
+    return [home for home, plugin, _ in profiles if plugin.resolve() in active]
+
+
 def source_digest(path):
     from .recovery import digest
-    # Build artifacts are not installed source and must not hide actual source edits.
     with tempfile.TemporaryDirectory(prefix='jr-source-compare-') as temp:
         target = Path(temp) / 'source'
         shutil.copytree(path, target, symlinks=True, ignore=shutil.ignore_patterns(
@@ -87,8 +98,7 @@ def source_digest(path):
 def verify_profile_copies(profiles, work, log):
     baselines = {}
     for _, plugin, metadata in profiles:
-        entry = json.loads(metadata.read_text())['hermes-jr']
-        revision = entry['revision']
+        revision = json.loads(metadata.read_text())['hermes-jr']['revision']
         if revision not in baselines:
             home = work / ('baseline-' + revision)
             home.mkdir(mode=0o700)
@@ -98,49 +108,51 @@ def verify_profile_copies(profiles, work, log):
             raise ValueError('An installed plugin contains local changes; preserve them and update manually')
 
 
-def package_layout():
-    dist = importlib.metadata.distribution('hermes-jr-companion')
-    direct = json.loads(dist.read_text('direct_url.json') or '{}')
-    if direct.get('dir_info', {}).get('editable'):
-        raise ValueError('Editable development installs need a manual update')
-    site = Path(dist.locate_file('')).resolve()
-    metadata = next((site / f.parts[0] for f in dist.files or [] if f.parts[0].endswith('.dist-info')), None)
-    if not metadata or not (site / 'hermes_jr').is_dir():
-        raise ValueError('Cannot safely identify the installed companion package')
-    return dist, site, metadata
+def validate_candidate(candidate, expected_version):
+    from .installation_health import manifest_version
+    from pm.plugin_declarations import read_python_declaration
+    if (candidate / 'pyproject.toml').exists() or manifest_version(candidate / 'plugin.yaml') != expected_version:
+        raise ValueError('Release plugin layout or version does not match the signed release')
+    if read_python_declaration(candidate).install_requirements != (f'hermes-jr-companion=={expected_version}',):
+        raise ValueError('Release plugin does not pin its companion package')
+    try:
+        policy = json.loads((candidate / 'COMPATIBILITY.json').read_text())
+    except (OSError, ValueError):
+        raise ValueError('This release has no valid update compatibility declaration') from None
+    if policy != POLICY:
+        raise ValueError('This release needs a protocol or state migration; use its manual instructions')
 
 
-def validate_wheel(wheel, expected_version, installed):
-    with zipfile.ZipFile(wheel) as archive:
-        infos = [n for n in archive.namelist() if n.endswith('.dist-info/METADATA')]
-        if len(infos) != 1:
-            raise ValueError('Invalid update package')
-        dirname = infos[0].split('/')[0]
-        if dirname != 'hermes_jr_companion-' + expected_version + '.dist-info':
-            raise ValueError('Update package does not match the selected release')
-        for name in archive.namelist():
-            if '..' in Path(name).parts or not name.startswith(('hermes_jr/', dirname + '/')):
-                raise ValueError('Update package contains files outside the companion')
-        entries = configparser.ConfigParser()
-        entries.read_string(archive.read(dirname + '/entry_points.txt').decode())
-        if entries.sections() != ['console_scripts'] or dict(entries['console_scripts']) != {'hermes-jr': 'hermes_jr.cli:main'}:
-            raise ValueError('Update package changes executable ownership; use a manual update')
-        wheel_info = BytesParser().parsebytes(archive.read(dirname + '/WHEEL'))
-        if wheel_info['Root-Is-Purelib'] != 'true':
-            raise ValueError('Update package changes installation layout')
-        metadata = BytesParser().parsebytes(archive.read(infos[0]))
-        if metadata['Name'] != 'hermes-jr-companion' or metadata['Version'] != expected_version:
-            raise ValueError('Unexpected package identity')
-        if not set(metadata.get_all('Requires-Dist') or []).issubset(set(installed.metadata.get_all('Requires-Dist') or [])):
-            raise ValueError('This release adds or changes dependency requirements; no installed files were changed')
-        return dirname
+def managed_version():
+    try:
+        result = subprocess.run(
+            [managed_python(), '-I', '-c',
+             'import importlib.metadata; print(importlib.metadata.version("hermes-jr-companion"))'],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def verify_package(expected, profiles, commit, log):
+    if managed_version() != expected:
+        raise ValueError('Hermes did not select the expected companion package')
+    run([managed_python(), '-I', '-c',
+         'from hermes_jr import cli, daemon; import argparse; '
+         'cli.configure_parser(argparse.ArgumentParser())'], log=log)
+    from .installation_health import manifest_version
+    for home, plugin, metadata in profiles:
+        if manifest_version(plugin / 'plugin.yaml') != expected:
+            raise ValueError('Installed plugin version does not match the package')
+        if commit and json.loads(metadata.read_text()).get('hermes-jr', {}).get('revision') != commit:
+            raise ValueError('Installed plugin commit does not match the signed release')
+        hermes(home, log, 'plugins', 'doctor', str(plugin), '--ci')
 
 
 def verify_connection(state):
-    """Check the newly imported code and live connection before committing an update."""
     if not state.get('service_url'):
-        return  # An unconfigured installation has no live connection to validate.
-    result = subprocess.run([sys.executable, '-m', 'hermes_jr.cli', 'doctor'],
+        return
+    result = subprocess.run([managed_python(), '-m', 'hermes_jr.cli', 'doctor'],
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=45)
     try:
         health = json.loads(result.stdout)
@@ -153,12 +165,33 @@ def verify_connection(state):
         raise ValueError('Updated companion failed its connection checks')
 
 
+def disable_active(profiles, log):
+    for home in active_homes(profiles):
+        hermes(home, log, 'plugins', 'disable', 'hermes-jr')
+
+
+def enable_homes(homes, log):
+    for home in homes:
+        hermes(home, log, 'plugins', 'enable', 'hermes-jr')
+
+
+def refresh_service(manager, *, restart):
+    if not manager.path.is_file():
+        return
+    private_write(manager.path, manager.definition(managed_python()))
+    if manager.platform == 'linux':
+        manager.command(['systemctl', '--user', 'daemon-reload'])
+    if restart:
+        manager.start()
+
+
 def install(state, release, *, receipt_id=None):
     from .release_signature import verify
     verify(release)
     if release.get('state') != 'available' or not re.fullmatch('[0-9a-f]{40}', release.get('commit', '')):
         raise ValueError('No verified newer stable release is available')
-    if version(release['latest']) <= version(installed_version()):
+    current = managed_version()
+    if current is None or version(release['latest']) <= version(current):
         raise ValueError('The release is not newer than the installed companion')
     manager = Supervisor(state)
     with lock(state.directory / 'update.lock'):
@@ -169,7 +202,9 @@ def install(state, release, *, receipt_id=None):
             if prior.journal['phase'] not in ('complete', 'rolled_back', 'prepared'):
                 raise ValueError('An interrupted update needs recovery first; run hermes jr rollback')
         profiles = installed_profiles()
-        dist, site, old_metadata = package_layout()
+        active = active_homes(profiles)
+        if not active:
+            raise ValueError('No Hermes Jr profile is enabled; enable one profile through Hermes before updating')
         manager_state = manager.status()
         if manager_state['bridge_running'] and not manager_state['manager_active']:
             raise ValueError('Stop the foreground bridge before updating')
@@ -178,32 +213,20 @@ def install(state, release, *, receipt_id=None):
         work = Path(tempfile.mkdtemp(prefix='prepare-', dir=backups))
         log = work / 'update.log'
         log.touch(mode=0o600)
-        # The native installer scans the exact commit in isolated profile state before it is built.
         verify_profile_copies(profiles, work, log)
         staging_home = work / 'profile'
         staging_home.mkdir(mode=0o700)
         native_install(staging_home, release['commit'], log)
-        candidate = staging_home / 'plugins/hermes-jr'
-        try:
-            policy = json.loads((candidate / 'COMPATIBILITY.json').read_text())
-        except (OSError, ValueError):
-            raise ValueError('This release has no valid update compatibility declaration; use its manual instructions') from None
-        if policy != POLICY:
-            raise ValueError('This release needs a protocol or state migration; use its manual instructions')
-        wheel_dir = work / 'wheels'
-        run([sys.executable, '-m', 'pip', 'wheel', '--no-deps', str(candidate), '--wheel-dir', str(wheel_dir)], log=log)
-        wheels = list(wheel_dir.glob('*.whl'))
-        if len(wheels) != 1:
-            raise ValueError('Could not build one unambiguous update package')
-        metadata_name = validate_wheel(wheels[0], release['latest'], dist)
-        resources = [site / 'hermes_jr', old_metadata, site / metadata_name,
-                     Path(sysconfig.get_path('scripts')) / 'hermes-jr']
-        resources += [path for _, plugin, metadata in profiles for path in (plugin, metadata)]
+        validate_candidate(staging_home / 'plugins/hermes-jr', release['latest'])
+        resources = [path for _, plugin, metadata in profiles for path in (plugin, metadata)]
         snapshot = Snapshot.create(backups / uuid.uuid4().hex, resources,
-                                   state_directory=str(state.directory.resolve()), python=sys.executable,
-                                   previous_version=installed_version(), target_version=release['latest'],
-                                   commit=release['commit'], update_request=receipt_id, log=str(log), restart=bool(manager_state['bridge_running']),
-                                   stop_command=(['launchctl', 'bootout', f'{manager.domain}/{manager.label}'] if manager.platform == 'darwin' else ['systemctl', '--user', 'stop', manager.unit]))
+                                   state_directory=str(state.directory.resolve()),
+                                   previous_version=current, target_version=release['latest'],
+                                   commit=release['commit'], update_request=receipt_id, log=str(log),
+                                   enabled_homes=[str(home) for home in active],
+                                   restart=bool(manager_state['manager_active']),
+                                   stop_command=(['launchctl', 'bootout', f'{manager.domain}/{manager.label}']
+                                                 if manager.platform == 'darwin' else ['systemctl', '--user', 'stop', manager.unit]))
         write_json(pointer, {'backup': str(snapshot.directory)})
         try:
             if manager_state['manager_active']:
@@ -211,40 +234,32 @@ def install(state, release, *, receipt_id=None):
             with lock(state.directory / 'bridge.lock'):
                 snapshot.ensure_unchanged('before')
                 snapshot.save(phase='applying')
+                disable_active(profiles, log)
                 for home, _, _ in profiles:
                     native_install(home, release['commit'], log)
-                run([sys.executable, '-m', 'pip', 'install', '--no-deps', '--force-reinstall', str(wheels[0])], log=log)
-                run([sys.executable, '-m', 'pip', 'check'], log=log)
-                run([sys.executable, '-I', '-c', 'from hermes_jr import cli, daemon; from hermes_jr.updates import installed_version; import argparse; assert installed_version() == ' + repr(release['latest']) + '; cli.configure_parser(argparse.ArgumentParser())'], log=log)
-                from .installation_health import manifest_version
-                for home, plugin, metadata in profiles:
-                    if manifest_version(plugin / 'plugin.yaml') != release['latest'] or json.loads(metadata.read_text()).get('hermes-jr', {}).get('revision') != release['commit']:
-                        raise ValueError('Updated native plugin does not match the verified package release')
-                    run([sys.executable, '-m', 'hermes_cli.main', 'plugins', 'doctor', str(plugin), '--ci'], home=home, log=log)
-            if snapshot.journal['restart']:
-                manager.start()
+                enable_homes(active, log)
+                verify_package(release['latest'], profiles, release['commit'], log)
+            refresh_service(manager, restart=bool(manager_state['manager_active']))
+            if manager_state['manager_active']:
                 verify_connection(state)
             snapshot.complete()
         except BaseException:
-            if snapshot.journal['phase'] == 'prepared':
+            try:
+                manager.stop()
+                with lock(state.directory / 'bridge.lock'):
+                    disable_active(profiles, log)
+                    snapshot.restore(check_current=False)
+                    enable_homes(active, log)
+                    verify_package(current, profiles, None, log)
+                refresh_service(manager, restart=bool(manager_state['manager_active']))
                 if previous_pointer:
                     write_json(pointer, previous_pointer)
                 else:
                     pointer.unlink(missing_ok=True)
-                if snapshot.journal['restart']:
-                    manager.start()
-                raise ValueError('Update stopped before replacing files; installed code was left unchanged') from None
-            # Stop only this bridge, restore code, and leave live Hermes processes alone.
-            try:
-                manager.stop()
-                with lock(state.directory / 'bridge.lock'):
-                    snapshot.restore(check_current=False)
-                if snapshot.journal['restart']:
-                    manager.start()
             except BaseException:
-                raise ValueError('Update and automatic recovery could not finish. Keep the service stopped; run hermes jr rollback or the recover.py saved in update-backups') from None
+                raise ValueError('Update and automatic recovery could not finish. Keep the bridge stopped; inspect the saved update log and backup') from None
             raise ValueError('Update failed; the previous companion was restored. See the private update log') from None
-    print('Companion updated. Pairings preserved. Restart loaded Hermes processes when their work is idle, then run hermes jr doctor.')
+    print('Companion updated. Pairings preserved. Restart loaded Hermes processes when idle, then run hermes jr doctor.')
 
 
 def rollback(state):
@@ -253,17 +268,23 @@ def rollback(state):
         if not pointer.exists():
             raise ValueError('No managed update backup exists')
         snapshot = Snapshot(json.loads(pointer.read_text())['backup'])
-        if snapshot.journal['phase'] == 'rolled_back':
-            raise ValueError('The previous companion has already been restored')
-        if snapshot.journal['phase'] == 'prepared':
-            raise ValueError('This update never replaced installed files; there is nothing to roll back')
-        if snapshot.journal['phase'] == 'complete':
-            snapshot.ensure_unchanged('after')
+        if snapshot.journal['phase'] != 'complete':
+            raise ValueError('The previous update is not complete and cannot be rolled back automatically')
+        profiles = installed_profiles()
+        active = [Path(home) for home in snapshot.journal['enabled_homes']]
+        if set(active_homes(profiles)) != set(active):
+            raise ValueError('Profile enablement changed since the update; preserve those choices and roll back manually')
+        snapshot.ensure_unchanged('after')
         manager = Supervisor(state)
-        running = manager.status()['bridge_running']
+        running = manager.status()['manager_active']
         manager.stop()
-        with lock(state.directory / 'bridge.lock'):
-            snapshot.restore(check_current=snapshot.journal['phase'] == 'complete')
-        if running or snapshot.journal.get('restart'):
-            manager.start()
+        try:
+            with lock(state.directory / 'bridge.lock'):
+                disable_active(profiles, snapshot.journal['log'])
+                snapshot.restore(check_current=False)
+                enable_homes(active, snapshot.journal['log'])
+                verify_package(snapshot.journal['previous_version'], installed_profiles(), None, snapshot.journal['log'])
+            refresh_service(manager, restart=running)
+        except BaseException:
+            raise ValueError('Rollback could not finish; keep the bridge stopped and inspect the saved update log and backup') from None
     print('Previous companion restored. Pairings preserved. Restart loaded Hermes processes when idle and run hermes jr doctor.')

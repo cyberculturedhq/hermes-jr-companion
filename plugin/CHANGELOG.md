@@ -1,3 +1,9 @@
+## 0.17.0
+
+- Publish the companion Python package from the repository root to PyPI; keep the installed directory plugin free of `pyproject.toml` and declare an exact package version in `plugin.yaml`.
+- Install and update through Hermes' package manager, including guided updates, profile-preserving rollback, and standalone recovery.
+- Require removal of the pre-0.17 plugin from all profiles before a fresh install on the updated Hermes Agent.
+
 ## 0.16.0
 
 - Track explicitly requested iPhone updates through the signed installer, including the first upgrade from older companions.

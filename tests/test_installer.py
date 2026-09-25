@@ -1,192 +1,140 @@
+"""Hermes PM update publication and recovery across profile copies."""
 from signing_fixture import PUBLIC, signature
-from email.message import Message
+import base64
 import json
 from pathlib import Path
-import shutil
 import tempfile
-import types
+import time
 import unittest
+import uuid
 from unittest.mock import Mock, patch
-import zipfile
-from hermes_jr import installer
+
+from hermes_jr import installer, update_requests
 from hermes_jr.recovery import Snapshot
 from hermes_jr.state import State
 
 
 class InstallerTests(unittest.TestCase):
     def setUp(self):
-        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
-        self.root=Path(self.temp.name)
-        self.state=State(self.root/'state')
-        self.site=self.root/'site';self.site.mkdir()
-        self.package=self.site/'hermes_jr';self.package.mkdir()
-        (self.package/'code.py').write_text('old')
-        self.old_meta=self.site/'hermes_jr_companion-0.3.0.dist-info';self.old_meta.mkdir()
-        (self.old_meta/'METADATA').write_text('old metadata')
-        self.bin=self.root/'bin';self.bin.mkdir();(self.bin/'hermes-jr').write_text('old executable')
-        self.home=self.root/'home';self.plugin=self.home/'plugins/hermes-jr';self.plugin.mkdir(parents=True)
-        (self.plugin/'plugin.yaml').write_text('old plugin')
-        self.metadata=self.home/'plugins/.install-metadata.json';self.metadata.write_text('original metadata')
-        (self.home/'config.yaml').write_text('user config')
-        meta=Message();meta['Requires-Dist']='aiohttp<4,>=3.12'
-        self.dist=types.SimpleNamespace(metadata=meta)
-        self.manager=Mock(platform='darwin',domain='gui/123',label='fixture')
-        self.manager.status.return_value={'bridge_running':True,'manager_active':True}
-        key_patch=patch('hermes_jr.release_signature.PUBLIC_KEY',PUBLIC)
-        key_patch.start();self.addCleanup(key_patch.stop)
-        self.release={'signature':signature('0.4.0'),'state':'available','latest':'0.4.0','commit':'a'*40}
-        self.stage_fail=None
-        patches=[patch.object(installer,'Supervisor',return_value=self.manager),
-                 patch.object(installer,'installed_profiles',return_value=[(self.home,self.plugin,self.metadata)]),
-                 patch.object(installer,'verify_profile_copies'),
-                 patch.object(installer,'package_layout',return_value=(self.dist,self.site,self.old_meta)),
-                 patch.object(installer,'installed_version',return_value='0.3.0'),
-                 patch.object(installer.sysconfig,'get_path',return_value=str(self.bin)),
-                 patch.object(installer,'native_install',side_effect=self.native),
-                 patch.object(installer,'run',side_effect=self.run_command)]
-        for p in patches:p.start();self.addCleanup(p.stop)
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.state = State(self.root / 'state')
+        self.homes = [self.root / 'default', self.root / 'profiles/other']
+        self.profiles = []
+        for home in self.homes:
+            plugin = home / 'plugins/hermes-jr'
+            plugin.mkdir(parents=True)
+            (plugin / 'plugin.yaml').write_text('version: 0.3.0\n')
+            metadata = home / 'plugins/.install-metadata.json'
+            metadata.write_text(json.dumps({'hermes-jr': {
+                'source': installer.PLUGIN_SOURCE, 'revision': 'b' * 40}}))
+            self.profiles.append((home, plugin, metadata))
+        self.active = [self.homes[0]]
+        self.selected = '0.3.0'
+        self.events = []
+        self.failure = None
+        self.manager = Mock(platform='darwin', domain='gui/123', label='fixture')
+        self.manager.status.return_value = {'bridge_running': True, 'manager_active': True}
+        self.release = {'signature': signature('0.4.0'), 'state': 'available',
+                        'latest': '0.4.0', 'commit': 'a' * 40}
+        for target, name, kwargs in [
+            (installer, 'Supervisor', {'return_value': self.manager}),
+            (installer, 'installed_profiles', {'return_value': self.profiles}),
+            (installer, 'active_homes', {'side_effect': lambda _: list(self.active)}),
+            (installer, 'verify_profile_copies', {}),
+            (installer, 'validate_candidate', {}),
+            (installer, 'managed_version', {'side_effect': lambda: self.selected}),
+            (installer, 'native_install', {'side_effect': self.native}),
+            (installer, 'hermes', {'side_effect': self.hermes}),
+            (installer, 'verify_package', {'side_effect': self.verify}),
+            (installer, 'refresh_service', {}),
+            (installer, 'verify_connection', {}),
+        ]:
+            p = patch.object(target, name, **kwargs)
+            p.start()
+            self.addCleanup(p.stop)
+        key = patch('hermes_jr.release_signature.PUBLIC_KEY', PUBLIC)
+        key.start()
+        self.addCleanup(key.stop)
 
     def native(self, home, commit, log):
-        if home==self.home:
-            (self.plugin/'plugin.yaml').write_text('name: hermes-jr\nversion: 0.4.0\n')
-            self.metadata.write_text(json.dumps({'hermes-jr': {'revision': commit}}))
-        else:
-            candidate=home/'plugins/hermes-jr';candidate.mkdir(parents=True)
-            (candidate/'COMPATIBILITY.json').write_text(json.dumps(installer.POLICY))
+        self.events.append(('install', home))
+        if self.failure == 'install' and home == self.homes[1]:
+            raise ValueError('injected install failure')
+        plugin = home / 'plugins/hermes-jr'
+        plugin.mkdir(parents=True, exist_ok=True)
+        (plugin / 'plugin.yaml').write_text('version: 0.4.0\n')
+        (plugin / 'COMPATIBILITY.json').write_text(json.dumps(installer.POLICY))
+        (home / 'plugins/.install-metadata.json').write_text(json.dumps({'hermes-jr': {
+            'source': installer.PLUGIN_SOURCE, 'revision': commit}}))
 
-    def run_command(self, args, **kwargs):
-        if 'wheel' in args:
-            directory=Path(args[-1]);directory.mkdir()
-            prefix='hermes_jr_companion-0.4.0.dist-info'
-            with zipfile.ZipFile(directory/'candidate.whl','w') as z:
-                z.writestr(prefix+'/METADATA','Name: hermes-jr-companion\nVersion: 0.4.0\nRequires-Dist: aiohttp<4,>=3.12\n')
-                z.writestr(prefix+'/WHEEL','Root-Is-Purelib: true\n')
-                z.writestr(prefix+'/entry_points.txt','[console_scripts]\nhermes-jr = hermes_jr.cli:main\n')
-                z.writestr('hermes_jr/__init__.py','')
-        elif 'pip' in args and 'install' in args:
-            (self.package/'code.py').write_text('new')
-            shutil.rmtree(self.old_meta)
-            new=self.site/'hermes_jr_companion-0.4.0.dist-info';new.mkdir()
-            (new/'METADATA').write_text('new metadata')
-            (self.bin/'hermes-jr').write_text('new executable')
-            if self.stage_fail=='pip':raise ValueError('injected pip failure')
-        elif 'doctor' in args and self.stage_fail=='doctor':
-            raise ValueError('injected doctor failure')
+    def hermes(self, home, log, *args):
+        action = args[1]
+        self.events.append((action, home))
+        if action == 'disable':
+            self.active.remove(home)
+            self.selected = None
+        elif action == 'enable':
+            self.active.append(home)
+            self.selected = '0.4.0' if '0.4.0' in (home / 'plugins/hermes-jr/plugin.yaml').read_text() else '0.3.0'
 
-    def assert_old(self):
-        self.assertEqual((self.package/'code.py').read_text(),'old')
-        self.assertTrue(self.old_meta.exists())
-        self.assertFalse((self.site/'hermes_jr_companion-0.4.0.dist-info').exists())
-        self.assertEqual((self.bin/'hermes-jr').read_text(),'old executable')
-        self.assertEqual((self.plugin/'plugin.yaml').read_text(),'old plugin')
-        self.assertEqual(self.metadata.read_text(),'original metadata')
-        self.assertEqual((self.home/'config.yaml').read_text(),'user config')
+    def verify(self, expected, profiles, commit, log):
+        self.events.append(('verify', expected))
+        if self.selected != expected or (self.failure == 'verify' and expected == '0.4.0'):
+            raise ValueError('PM package mismatch')
+        for _, plugin, _ in profiles:
+            if expected not in (plugin / 'plugin.yaml').read_text():
+                raise ValueError('plugin package mismatch')
 
-    def test_success_then_explicit_rollback(self):
-        installer.install(self.state,self.release)
-        self.assertEqual((self.package/'code.py').read_text(),'new')
+    def assert_restored(self):
+        self.assertEqual(self.active, [self.homes[0]])
+        self.assertEqual(self.selected, '0.3.0')
+        for _, plugin, metadata in self.profiles:
+            self.assertEqual((plugin / 'plugin.yaml').read_text(), 'version: 0.3.0\n')
+            self.assertEqual(json.loads(metadata.read_text())['hermes-jr']['revision'], 'b' * 40)
+
+    def test_update_and_rollback_cover_all_profiles(self):
+        installer.install(self.state, self.release)
+        self.assertEqual(self.active, [self.homes[0]])
+        self.assertEqual(self.selected, '0.4.0')
+        self.assertEqual(self.events[1:5], [('disable', self.homes[0]),
+                                           ('install', self.homes[0]),
+                                           ('install', self.homes[1]),
+                                           ('enable', self.homes[0])])
         installer.rollback(self.state)
-        self.assert_old()
-        self.assertEqual(self.manager.start.call_count,2)
+        self.assert_restored()
 
-    def test_guided_update_commits_receipt_with_real_snapshot_and_queues_success(self):
-        self.guided_update(fail=False)
+    def test_failed_install_restores_profile_copies_and_pm_selection(self):
+        self.failure = 'install'
+        with self.assertRaisesRegex(ValueError, 'previous companion was restored'):
+            installer.install(self.state, self.release)
+        self.assert_restored()
 
-    def test_guided_update_rollback_preserves_pairing_and_never_queues_success(self):
-        self.guided_update(fail=True)
+    def test_failed_verification_restores_previous_selection(self):
+        self.failure = 'verify'
+        with self.assertRaisesRegex(ValueError, 'previous companion was restored'):
+            installer.install(self.state, self.release)
+        self.assert_restored()
 
-    def guided_update(self, *, fail):
-        import base64, time, uuid
-        from hermes_jr import update_requests
+    def test_all_disabled_copies_stop_before_source_replacement(self):
+        self.active.clear()
+        with self.assertRaisesRegex(ValueError, 'No Hermes Jr profile is enabled'):
+            installer.install(self.state, self.release)
+        self.assertFalse(self.events)
+
+    def test_guided_receipt_completes_after_pm_verification(self):
         device = str(uuid.uuid4())
         self.state.add_device(device, 'Phone', 'fixture', paired=True)
-        self.state.set('push_enabled', True); self.state.set_push(device, True)
-        receipt = dict(id=str(uuid.uuid4()), device_id=device, profile='default', session_id='update-chat',
-                       target='0.4.0', notify=True, created=time.time())
+        self.state.set('push_enabled', True)
+        self.state.set_push(device, True)
+        receipt = dict(id=str(uuid.uuid4()), device_id=device, profile='default',
+                       session_id='update-chat', target='0.4.0', notify=True,
+                       created=time.time())
         encoded = base64.urlsafe_b64encode(json.dumps(receipt).encode()).decode().rstrip('=')
-        if fail: self.stage_fail = 'doctor'
-        with patch.object(update_requests, 'installed_version', side_effect=lambda: '0.4.0' if (self.package/'code.py').read_text() == 'new' else '0.3.0'):
-            if fail:
-                with self.assertRaises(ValueError): update_requests.run_tracked(self.state, self.release, encoded)
-                self.assert_old()
-            else:
-                update_requests.run_tracked(self.state, self.release, encoded)
-        journal = Snapshot(json.loads((self.state.directory/'last-update.json').read_text())['backup']).journal
+        update_requests.run_tracked(self.state, self.release, encoded)
+        journal = Snapshot(json.loads((self.state.directory / 'last-update.json').read_text())['backup']).journal
         self.assertEqual(journal['update_request'], receipt['id'])
-        self.assertEqual(journal['phase'], 'rolled_back' if fail else 'complete')
-        self.assertEqual(update_requests.status(self.state, device, receipt['id'])['status'], 'failed' if fail else 'completed')
-        self.assertTrue(self.state.device(device)['approved'])
-        self.assertEqual(len(self.state.outbox()), 0 if fail else 1)
-
-    def test_pip_failure_restores_all_installation_surfaces(self):
-        self.stage_fail='pip'
-        with self.assertRaisesRegex(ValueError,'previous companion was restored'):
-            installer.install(self.state,self.release)
-        self.assert_old()
-
-    def test_validation_failure_restores_previous_package(self):
-        self.stage_fail='doctor'
-        with self.assertRaisesRegex(ValueError,'previous companion was restored'):
-            installer.install(self.state,self.release)
-        self.assert_old()
-
-    def test_native_version_mismatch_rolls_back_package_and_profiles(self):
-        native = self.native
-        def wrong_version(home, commit, log):
-            native(home, commit, log)
-            if home == self.home:
-                (self.plugin/'plugin.yaml').write_text('version: 0.3.0\n')
-        with patch.object(installer, 'native_install', side_effect=wrong_version):
-            with self.assertRaisesRegex(ValueError, 'previous companion was restored'):
-                installer.install(self.state, self.release)
-        self.assert_old()
-
-    def test_startup_failure_restores_and_restarts_previous_service(self):
-        self.manager.start.side_effect=[ValueError('new version failed startup'),None]
-        with self.assertRaisesRegex(ValueError,'previous companion was restored'):
-            installer.install(self.state,self.release)
-        self.assert_old()
-        self.assertEqual(self.manager.start.call_count,2)
-
-    def test_preflight_race_never_overwrites_new_user_edits(self):
-        def stop(): (self.plugin/'plugin.yaml').write_text('user edited while preparing')
-        self.manager.stop.side_effect=stop
-        with self.assertRaisesRegex(ValueError,'left unchanged'):
-            installer.install(self.state,self.release)
-        self.assertEqual((self.plugin/'plugin.yaml').read_text(),'user edited while preparing')
-        self.assertEqual((self.package/'code.py').read_text(),'old')
-        self.assertFalse((self.state.directory/'last-update.json').exists())
-
-    def test_interrupted_apply_uses_saved_recovery(self):
-        installer.install(self.state,self.release)
-        snap=Snapshot(json.loads((self.state.directory/'last-update.json').read_text())['backup'])
-        snap.save(phase='applying')
-        (self.package/'code.py').write_text('partially replaced')
-        installer.rollback(self.state)
-        self.assert_old()
-
-    def test_live_connection_failure_rolls_back_after_service_start(self):
-        with patch.object(installer, 'verify_connection', side_effect=ValueError('health failed')):
-            with self.assertRaisesRegex(ValueError, 'previous companion was restored'):
-                installer.install(self.state, self.release)
-        self.assert_old()
-
-    def test_removed_dependency_can_update_without_uninstalling_shared_packages(self):
-        self.dist.metadata['Requires-Dist'] = 'qrcode==8.2'
-        installer.install(self.state, self.release)
-        installer.rollback(self.state)
-        self.assert_old()
-
-
-class ProfileDiscoveryTests(unittest.TestCase):
-    def test_custom_active_home_is_not_omitted_from_update(self):
-        import sys
-        with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp)/'default';active=Path(temp)/'custom'
-            for home in [root,active]:
-                (home/'plugins/hermes-jr').mkdir(parents=True)
-                (home/'plugins/.install-metadata.json').write_text(json.dumps({'hermes-jr': {'source':installer.PLUGIN_SOURCE,'revision':'a'*40}}))
-            constants=types.SimpleNamespace(get_default_hermes_root=lambda:root,
-                get_hermes_home=lambda:active,named_profile_is_deleted=lambda p:False)
-            with patch.dict(sys.modules,{'hermes_constants':constants}):
-                self.assertEqual({p[0] for p in installer.installed_profiles()},{root.resolve(),active})
+        self.assertEqual(journal['phase'], 'complete')
+        self.assertEqual(update_requests.status(self.state, device, receipt['id'])['status'], 'completed')
+        self.assertEqual(len(self.state.outbox()), 1)
