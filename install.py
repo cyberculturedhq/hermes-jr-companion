@@ -19,7 +19,7 @@ REPO = 'cyberculturedhq/hermes-jr-companion'
 SOURCE = 'https://github.com/' + REPO + '.git#plugin'
 API = 'https://api.github.com/repos/' + REPO
 PUBLIC_KEY = 'ac072d31db546d1f241ac1ace40cb0b474bd4e833d78385cb9f03499e44778af'
-MINIMUM = (0, 15, 0)
+RELEASE_MINIMUM = (0, 17, 0)
 
 
 def version(value):
@@ -74,7 +74,7 @@ def release():
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     data = get_json('/releases/latest')
     tag = data['tag_name']
-    if data.get('draft') or data.get('prerelease') or version(tag) < MINIMUM:
+    if data.get('draft') or data.get('prerelease') or version(tag) < RELEASE_MINIMUM:
         raise ValueError('The required stable release is not published yet. Keep the current installation.')
     obj = get_json('/git/ref/tags/' + tag)['object']
     for _ in range(4):
@@ -120,7 +120,7 @@ def inspect(command):
 
 def reuse(installed):
     # No GitHub access, package replacement, profile activation or service restart.
-    if version(installed) < MINIMUM:
+    if version(installed) < (0, 15, 0):
         raise ValueError('Native pairing panels require companion 0.15.0 or newer. Follow UPDATES.md for an explicit update, then reopen the interactive Hermes session. Existing connections are unchanged; do not reinstall as a generic repair.')
     health = inspect(['doctor'])
     manager = inspect(['service', 'status'])

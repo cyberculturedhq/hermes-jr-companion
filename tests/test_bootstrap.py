@@ -15,8 +15,8 @@ class BootstrapTests(unittest.TestCase):
     def test_release_binds_commit_and_rejects_tampering(self):
         key = Ed25519PrivateKey.generate()
         commit = 'a' * 40
-        signature = base64.b64encode(key.sign(f'hermes-jr-release-v1\n{bootstrap.REPO}\n0.15.0\n{commit}\n'.encode())).decode()
-        release = {'tag_name': 'v0.15.0', 'body': '<!-- hermes-jr-release-v1: ' + signature + ' -->'}
+        signature = base64.b64encode(key.sign(f'hermes-jr-release-v1\n{bootstrap.REPO}\n0.17.0\n{commit}\n'.encode())).decode()
+        release = {'tag_name': 'v0.17.0', 'body': '<!-- hermes-jr-release-v1: ' + signature + ' -->'}
         def fetch(path):
             return release if path == '/releases/latest' else {'object': {'sha': commit, 'type': 'commit'}}
         with patch.object(bootstrap, 'get_json', side_effect=fetch), patch.object(bootstrap, 'PUBLIC_KEY', key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()):
@@ -25,7 +25,7 @@ class BootstrapTests(unittest.TestCase):
             with self.assertRaises(Exception): bootstrap.release()
 
     def test_unpublished_or_prerelease_does_not_install(self):
-        for data in [{'tag_name':'v0.11.0'}, {'tag_name':'v0.15.0','prerelease':True}]:
+        for data in [{'tag_name':'v0.16.0'}, {'tag_name':'v0.17.0','prerelease':True}]:
             with patch.object(bootstrap, 'get_json', return_value=data), self.assertRaises(ValueError):
                 bootstrap.release()
 
