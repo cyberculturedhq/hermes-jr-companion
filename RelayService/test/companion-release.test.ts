@@ -34,6 +34,7 @@ it("serves and caches only a verified, bounded GitHub release", async () => {
   expect((await request()).status).toBe(200);
   expect(fetch).toHaveBeenCalledTimes(3);
   expect(fetch.mock.calls[0][0]).toBe(`${api}/releases/latest`);
+  expect(fetch.mock.calls[0][1]?.redirect).toBe("manual");
 });
 it("never caches a release with a changed commit, absent signature, or oversized response", async () => {
   const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
