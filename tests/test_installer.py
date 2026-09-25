@@ -138,3 +138,19 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(journal['phase'], 'complete')
         self.assertEqual(update_requests.status(self.state, device, receipt['id'])['status'], 'completed')
         self.assertEqual(len(self.state.outbox()), 1)
+
+    def test_failed_guided_update_never_queues_completion(self):
+        device = str(uuid.uuid4())
+        self.state.add_device(device, 'Phone', 'fixture', paired=True)
+        self.state.set('push_enabled', True)
+        self.state.set_push(device, True)
+        receipt = dict(id=str(uuid.uuid4()), device_id=device, profile='default',
+                       session_id='update-chat', target='0.4.0', notify=True,
+                       created=time.time())
+        encoded = base64.urlsafe_b64encode(json.dumps(receipt).encode()).decode().rstrip('=')
+        self.failure = 'verify'
+        with self.assertRaises(ValueError):
+            update_requests.run_tracked(self.state, self.release, encoded)
+        self.assert_restored()
+        self.assertEqual(update_requests.status(self.state, device, receipt['id'])['status'], 'failed')
+        self.assertEqual(self.state.outbox(), [])
