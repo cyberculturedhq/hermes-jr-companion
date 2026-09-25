@@ -87,7 +87,7 @@ python tools/sign_release.py --key /private/path/release-ed25519.pem --version V
 
 Create the `vVERSION` tag at that exact commit, wait for the PyPI publishing
 workflow to succeed and confirm the package is available on PyPI, then include
-the resulting HTML comment unchanged in the GitHub release body. The release-feed workflow validates that signature and attaches `companion-release.json`; it has no private signing key. Tag rules prevent later moves and
+the resulting HTML comment unchanged in the GitHub release body. The release-feed workflow validates that signature. The hosted service reads the release and tag from GitHub, verifies the signature, and serves the small JSON feed to the app; neither has the private signing key. Tag rules prevent later moves and
 deletion. Keep a secure backup of the private key. Key rotation requires a release
 signed by the currently trusted key that ships the next trusted public key;
 losing that key requires a clearly communicated manual reinstall. A GitHub
