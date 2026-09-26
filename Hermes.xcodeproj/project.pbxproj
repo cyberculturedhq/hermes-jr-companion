@@ -1,0 +1,586 @@
+// !$*UTF8*$!
+{
+	"classes" = {
+	};
+	"objectVersion" = "77";
+	"archiveVersion" = "1";
+	"objects" = {
+		"89BA70CDC82F46E3D1AF1EFA" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"5FE44C1D4108931802BC082F" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"SWIFT_EMIT_LOC_STRINGS" = "YES";
+				"DEVELOPMENT_TEAM" = "56MTG87283";
+				"MARKETING_VERSION" = "0.1.0";
+				"INFOPLIST_FILE" = "Hermes/Info.plist";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
+				"APNS_ENVIRONMENT" = "development";
+				"GENERATE_INFOPLIST_FILE" = "NO";
+				"ENABLE_PREVIEWS" = "YES";
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"CODE_SIGN_ENTITLEMENTS" = "Hermes/Hermes.entitlements";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.hermesjr.app";
+				"CURRENT_PROJECT_VERSION" = "3";
+				"SUPPORTS_MACCATALYST" = "NO";
+				"INFOPLIST_KEY_NotificationKeychainGroup" = "$(AppIdentifierPrefix)com.hermesjr.notifications";
+			};
+			"name" = "Debug";
+		};
+		"179F2225059AAC9EC2BB31FD" = {
+			"isa" = "PBXGroup";
+			"sourceTree" = "<group>";
+			"children" = (
+				"80AFA62B707A17E9B997312C",
+				"D0AA0563435056B968252D32",
+				"C50B1B0BE9B5B4CAE29B5726",
+				"7164A698C088403094159277",
+				"616038E2B9A64DF09CBE644D",
+			);
+		};
+		"D0AA0563435056B968252D32" = {
+			"isa" = "PBXFileSystemSynchronizedRootGroup";
+			"path" = "HermesTests";
+			"sourceTree" = "<group>";
+		};
+		"3F3EC91FC7EF03560080F6E4" = {
+			"path" = "Hermes.app";
+			"isa" = "PBXFileReference";
+			"includeInIndex" = "0";
+			"explicitFileType" = "wrapper.application";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"7FF8C9FC6B7E2F79F2A9323E" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"F2773B8D1A9D145C836C926B" = {
+			"dependencies" = (
+				"75A28D6A66F7E329D55AB34F",
+			);
+			"buildConfigurationList" = "72213FF12E84C84368DC5119";
+			"productReference" = "D8A0F8D81DC3EEEF6A43404C";
+			"productType" = "com.apple.product-type.bundle.unit-test";
+			"packageProductDependencies" = (
+			);
+			"productName" = "HermesTests";
+			"isa" = "PBXNativeTarget";
+			"fileSystemSynchronizedGroups" = (
+				"D0AA0563435056B968252D32",
+			);
+			"buildPhases" = (
+				"BC8E0882218F3785038CA835",
+				"6AEA005194D53B2ECD9A9F1D",
+				"556FA8786C08E8CF5467C9BF",
+			);
+			"name" = "HermesTests";
+			"buildRules" = (
+			);
+		};
+		"BC8E0882218F3785038CA835" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"40609A412964FFB79DAE9C3A" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CLANG_WARN_UNGUARDED_AVAILABILITY" = "YES_AGGRESSIVE";
+				"CLANG_WARN_SUSPICIOUS_MOVE" = "YES";
+				"CLANG_ENABLE_OBJC_ARC" = "YES";
+				"CLANG_WARN_DIRECT_OBJC_ISA_USAGE" = "YES_ERROR";
+				"GCC_WARN_UNDECLARED_SELECTOR" = "YES";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf";
+				"CLANG_WARN_INFINITE_RECURSION" = "YES";
+				"CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION" = "YES_AGGRESSIVE";
+				"SDKROOT" = "iphoneos";
+				"CLANG_CXX_LANGUAGE_STANDARD" = "gnu++20";
+				"ENABLE_TESTABILITY" = "YES";
+				"CLANG_WARN_BOOL_CONVERSION" = "YES";
+				"CLANG_WARN_UNREACHABLE_CODE" = "YES";
+				"ENABLE_STRICT_OBJC_MSGSEND" = "YES";
+				"CLANG_ANALYZER_NONNULL" = "YES";
+				"CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING" = "YES";
+				"CLANG_WARN_STRICT_PROTOTYPES" = "YES";
+				"CLANG_WARN_ENUM_CONVERSION" = "YES";
+				"GCC_WARN_64_TO_32_BIT_CONVERSION" = "YES";
+				"CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER" = "YES";
+				"GCC_PREPROCESSOR_DEFINITIONS" = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				"SWIFT_VERSION" = "5.0";
+				"CLANG_WARN_EMPTY_BODY" = "YES";
+				"GCC_WARN_UNINITIALIZED_AUTOS" = "YES_AGGRESSIVE";
+				"GCC_WARN_ABOUT_RETURN_TYPE" = "YES_ERROR";
+				"CLANG_WARN_COMMA" = "YES";
+				"GCC_C_LANGUAGE_STANDARD" = "gnu17";
+				"GCC_WARN_UNUSED_VARIABLE" = "YES";
+				"CLANG_WARN_RANGE_LOOP_ANALYSIS" = "YES";
+				"CLANG_ENABLE_MODULES" = "YES";
+				"GCC_NO_COMMON_BLOCKS" = "YES";
+				"CLANG_WARN_INT_CONVERSION" = "YES";
+				"ALWAYS_SEARCH_USER_PATHS" = "NO";
+				"CLANG_WARN_OBJC_ROOT_CLASS" = "YES_ERROR";
+				"COPY_PHASE_STRIP" = "NO";
+				"CLANG_WARN_CONSTANT_CONVERSION" = "YES";
+				"CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS" = "YES";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-Onone";
+				"GCC_OPTIMIZATION_LEVEL" = "0";
+				"ONLY_ACTIVE_ARCH" = "YES";
+				"CLANG_WARN_NON_LITERAL_NULL_CONVERSION" = "YES";
+				"GCC_WARN_UNUSED_FUNCTION" = "YES";
+				"SWIFT_ACTIVE_COMPILATION_CONDITIONS" = "DEBUG $(inherited)";
+				"CLANG_WARN_OBJC_LITERAL_CONVERSION" = "YES";
+				"CLANG_WARN_DOCUMENTATION_COMMENTS" = "YES";
+				"CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF" = "YES";
+			};
+			"name" = "Debug";
+		};
+		"A8C4CABD5DA2B1F3DAB7CD6F" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"SWIFT_EMIT_LOC_STRINGS" = "YES";
+				"DEVELOPMENT_TEAM" = "56MTG87283";
+				"MARKETING_VERSION" = "0.1.0";
+				"INFOPLIST_FILE" = "Hermes/Info.plist";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
+				"APNS_ENVIRONMENT" = "production";
+				"GENERATE_INFOPLIST_FILE" = "NO";
+				"ENABLE_PREVIEWS" = "YES";
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"CODE_SIGN_ENTITLEMENTS" = "Hermes/Hermes.entitlements";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.hermesjr.app";
+				"CURRENT_PROJECT_VERSION" = "3";
+				"SUPPORTS_MACCATALYST" = "NO";
+				"INFOPLIST_KEY_NotificationKeychainGroup" = "$(AppIdentifierPrefix)com.hermesjr.notifications";
+			};
+			"name" = "Release";
+		};
+		"ACA16EC71E4125BC7D8202DD" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"75A28D6A66F7E329D55AB34F" = {
+			"isa" = "PBXTargetDependency";
+			"target" = "0265E5FA90B9788A00668228";
+			"targetProxy" = "24A6C050E0F521531BFF0DDF";
+		};
+		"72213FF12E84C84368DC5119" = {
+			"isa" = "XCConfigurationList";
+			"defaultConfigurationIsVisible" = "0";
+			"defaultConfigurationName" = "Release";
+			"buildConfigurations" = (
+				"9FA216397B46564D111A420A",
+				"C431EAB7FC7A652B4CD935FC",
+			);
+		};
+		"C50B1B0BE9B5B4CAE29B5726" = {
+			"isa" = "PBXGroup";
+			"name" = "Products";
+			"children" = (
+				"3F3EC91FC7EF03560080F6E4",
+				"D8A0F8D81DC3EEEF6A43404C",
+				"3D882A0C625E4A0FA071C23D",
+			);
+			"sourceTree" = "<group>";
+		};
+		"D567EBC7E7BFA1D0FEC0A634" = {
+			"isa" = "XCConfigurationList";
+			"defaultConfigurationIsVisible" = "0";
+			"defaultConfigurationName" = "Release";
+			"buildConfigurations" = (
+				"40609A412964FFB79DAE9C3A",
+				"24B7DFA423B1C8A2130AE03E",
+			);
+		};
+		"556FA8786C08E8CF5467C9BF" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"0265E5FA90B9788A00668228" = {
+			"dependencies" = (
+				"E8E7156AEB3248B381718E48",
+			);
+			"buildConfigurationList" = "FC7A9A3AB9DDE797BD5785B5";
+			"productReference" = "3F3EC91FC7EF03560080F6E4";
+			"productType" = "com.apple.product-type.application";
+			"packageProductDependencies" = (
+			);
+			"productName" = "Hermes";
+			"isa" = "PBXNativeTarget";
+			"fileSystemSynchronizedGroups" = (
+				"80AFA62B707A17E9B997312C",
+				"7164A698C088403094159277",
+			);
+			"buildPhases" = (
+				"7FF8C9FC6B7E2F79F2A9323E",
+				"89BA70CDC82F46E3D1AF1EFA",
+				"ACA16EC71E4125BC7D8202DD",
+				"F76E7EE1D3B44D45B820DBFA",
+			);
+			"name" = "Hermes";
+			"buildRules" = (
+			);
+		};
+		"FC7A9A3AB9DDE797BD5785B5" = {
+			"isa" = "XCConfigurationList";
+			"defaultConfigurationIsVisible" = "0";
+			"defaultConfigurationName" = "Release";
+			"buildConfigurations" = (
+				"5FE44C1D4108931802BC082F",
+				"A8C4CABD5DA2B1F3DAB7CD6F",
+			);
+		};
+		"80AFA62B707A17E9B997312C" = {
+			"path" = "Hermes";
+			"isa" = "PBXFileSystemSynchronizedRootGroup";
+			"exceptions" = (
+				"26FFF034942D00B03DCDA49F",
+			);
+			"sourceTree" = "<group>";
+		};
+		"6AEA005194D53B2ECD9A9F1D" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"24A6C050E0F521531BFF0DDF" = {
+			"isa" = "PBXContainerItemProxy";
+			"containerPortal" = "F6F4DA8D93E88A08220E03B7";
+			"remoteGlobalIDString" = "0265E5FA90B9788A00668228";
+			"remoteInfo" = "Hermes";
+			"proxyType" = "1";
+		};
+		"D8A0F8D81DC3EEEF6A43404C" = {
+			"path" = "HermesTests.xctest";
+			"isa" = "PBXFileReference";
+			"includeInIndex" = "0";
+			"explicitFileType" = "wrapper.cfbundle";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"26FFF034942D00B03DCDA49F" = {
+			"isa" = "PBXFileSystemSynchronizedBuildFileExceptionSet";
+			"membershipExceptions" = (
+				"Info.plist",
+				"Hermes.entitlements",
+			);
+			"target" = "0265E5FA90B9788A00668228";
+		};
+		"9FA216397B46564D111A420A" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				"BUNDLE_LOADER" = "$(TEST_HOST)";
+				"MARKETING_VERSION" = "0.1.0";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
+				"TEST_HOST" = "$(BUILT_PRODUCTS_DIR)/Hermes.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Hermes";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.hermesjr.app.tests";
+				"SUPPORTS_MACCATALYST" = "NO";
+				"CURRENT_PROJECT_VERSION" = "3";
+			};
+			"name" = "Debug";
+		};
+		"24B7DFA423B1C8A2130AE03E" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"CLANG_WARN_UNGUARDED_AVAILABILITY" = "YES_AGGRESSIVE";
+				"CLANG_WARN_SUSPICIOUS_MOVE" = "YES";
+				"CLANG_ENABLE_OBJC_ARC" = "YES";
+				"CLANG_WARN_DIRECT_OBJC_ISA_USAGE" = "YES_ERROR";
+				"GCC_WARN_UNDECLARED_SELECTOR" = "YES";
+				"IPHONEOS_DEPLOYMENT_TARGET" = "18.0";
+				"DEBUG_INFORMATION_FORMAT" = "dwarf-with-dsym";
+				"SWIFT_COMPILATION_MODE" = "wholemodule";
+				"CLANG_WARN_INFINITE_RECURSION" = "YES";
+				"CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION" = "YES_AGGRESSIVE";
+				"SDKROOT" = "iphoneos";
+				"CLANG_CXX_LANGUAGE_STANDARD" = "gnu++20";
+				"ENABLE_TESTABILITY" = "NO";
+				"CLANG_WARN_BOOL_CONVERSION" = "YES";
+				"CLANG_WARN_UNREACHABLE_CODE" = "YES";
+				"ENABLE_STRICT_OBJC_MSGSEND" = "YES";
+				"CLANG_ANALYZER_NONNULL" = "YES";
+				"CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING" = "YES";
+				"CLANG_WARN_STRICT_PROTOTYPES" = "YES";
+				"CLANG_WARN_ENUM_CONVERSION" = "YES";
+				"GCC_WARN_64_TO_32_BIT_CONVERSION" = "YES";
+				"CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER" = "YES";
+				"SWIFT_VERSION" = "5.0";
+				"CLANG_WARN_EMPTY_BODY" = "YES";
+				"GCC_WARN_UNINITIALIZED_AUTOS" = "YES_AGGRESSIVE";
+				"GCC_WARN_ABOUT_RETURN_TYPE" = "YES_ERROR";
+				"CLANG_WARN_COMMA" = "YES";
+				"GCC_C_LANGUAGE_STANDARD" = "gnu17";
+				"GCC_WARN_UNUSED_VARIABLE" = "YES";
+				"CLANG_WARN_RANGE_LOOP_ANALYSIS" = "YES";
+				"CLANG_ENABLE_MODULES" = "YES";
+				"GCC_NO_COMMON_BLOCKS" = "YES";
+				"CLANG_WARN_INT_CONVERSION" = "YES";
+				"ALWAYS_SEARCH_USER_PATHS" = "NO";
+				"CLANG_WARN_OBJC_ROOT_CLASS" = "YES_ERROR";
+				"COPY_PHASE_STRIP" = "NO";
+				"CLANG_WARN_CONSTANT_CONVERSION" = "YES";
+				"CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS" = "YES";
+				"SWIFT_OPTIMIZATION_LEVEL" = "-O";
+				"CLANG_WARN_NON_LITERAL_NULL_CONVERSION" = "YES";
+				"VALIDATE_PRODUCT" = "YES";
+				"GCC_WARN_UNUSED_FUNCTION" = "YES";
+				"CLANG_WARN_OBJC_LITERAL_CONVERSION" = "YES";
+				"CLANG_WARN_DOCUMENTATION_COMMENTS" = "YES";
+				"CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF" = "YES";
+			};
+			"name" = "Release";
+		};
+		"F6F4DA8D93E88A08220E03B7" = {
+			"buildConfigurationList" = "D567EBC7E7BFA1D0FEC0A634";
+			"targets" = (
+				"0265E5FA90B9788A00668228",
+				"F2773B8D1A9D145C836C926B",
+				"50F2ECB3E642473A89C5AF86",
+			);
+			"minimizedProjectReferenceProxies" = "1";
+			"developmentRegion" = "en";
+			"knownRegions" = (
+				"en",
+				"Base",
+			);
+			"isa" = "PBXProject";
+			"productRefGroup" = "C50B1B0BE9B5B4CAE29B5726";
+			"projectDirPath" = "";
+			"attributes" = {
+				"LastSwiftUpdateCheck" = "2660";
+				"BuildIndependentTargetsInParallel" = "YES";
+				"LastUpgradeCheck" = "2660";
+				"TargetAttributes" = {
+					"F2773B8D1A9D145C836C926B" = {
+						"TestTargetID" = "0265E5FA90B9788A00668228";
+						"CreatedOnToolsVersion" = "26.6";
+					};
+					"0265E5FA90B9788A00668228" = {
+						"CreatedOnToolsVersion" = "26.6";
+					};
+				};
+			};
+			"hasScannedForEncodings" = "0";
+			"projectRoot" = "";
+			"preferredProjectObjectVersion" = "77";
+			"mainGroup" = "179F2225059AAC9EC2BB31FD";
+		};
+		"C431EAB7FC7A652B4CD935FC" = {
+			"isa" = "XCBuildConfiguration";
+			"buildSettings" = {
+				"LD_RUNPATH_SEARCH_PATHS" = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				"BUNDLE_LOADER" = "$(TEST_HOST)";
+				"MARKETING_VERSION" = "0.1.0";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
+				"TEST_HOST" = "$(BUILT_PRODUCTS_DIR)/Hermes.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Hermes";
+				"GENERATE_INFOPLIST_FILE" = "YES";
+				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.hermesjr.app.tests";
+				"SUPPORTS_MACCATALYST" = "NO";
+				"CURRENT_PROJECT_VERSION" = "3";
+			};
+			"name" = "Release";
+		};
+		"7164A698C088403094159277" = {
+			"isa" = "PBXFileSystemSynchronizedRootGroup";
+			"path" = "SharedNotifications";
+			"sourceTree" = "<group>";
+		};
+		"FD11425B009641059FF88D73" = {
+			"isa" = "PBXFileSystemSynchronizedBuildFileExceptionSet";
+			"membershipExceptions" = (
+				"Info.plist",
+				"NotificationService.entitlements",
+			);
+			"target" = "50F2ECB3E642473A89C5AF86";
+		};
+		"616038E2B9A64DF09CBE644D" = {
+			"isa" = "PBXFileSystemSynchronizedRootGroup";
+			"path" = "HermesNotificationService";
+			"sourceTree" = "<group>";
+			"exceptions" = (
+				"FD11425B009641059FF88D73",
+			);
+		};
+		"3D882A0C625E4A0FA071C23D" = {
+			"isa" = "PBXFileReference";
+			"explicitFileType" = "wrapper.app-extension";
+			"includeInIndex" = "0";
+			"path" = "HermesNotificationService.appex";
+			"sourceTree" = "BUILT_PRODUCTS_DIR";
+		};
+		"EFEE3285153A4E20812E47F6" = {
+			"isa" = "XCBuildConfiguration";
+			"name" = "Debug";
+			"buildSettings" = {
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.hermesjr.app.notifications";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"CODE_SIGN_ENTITLEMENTS" = "HermesNotificationService/NotificationService.entitlements";
+				"INFOPLIST_FILE" = "HermesNotificationService/Info.plist";
+				"GENERATE_INFOPLIST_FILE" = "NO";
+				"SKIP_INSTALL" = "YES";
+				"APPLICATION_EXTENSION_API_ONLY" = "YES";
+				"CURRENT_PROJECT_VERSION" = "3";
+				"MARKETING_VERSION" = "0.1.0";
+				"DEVELOPMENT_TEAM" = "56MTG87283";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
+				"LD_RUNPATH_SEARCH_PATHS" = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				"SWIFT_VERSION" = "5.0";
+			};
+		};
+		"1F262316E4AD41EAB8B5559F" = {
+			"isa" = "XCBuildConfiguration";
+			"name" = "Release";
+			"buildSettings" = {
+				"PRODUCT_BUNDLE_IDENTIFIER" = "com.hermesjr.app.notifications";
+				"PRODUCT_NAME" = "$(TARGET_NAME)";
+				"CODE_SIGN_STYLE" = "Automatic";
+				"CODE_SIGN_ENTITLEMENTS" = "HermesNotificationService/NotificationService.entitlements";
+				"INFOPLIST_FILE" = "HermesNotificationService/Info.plist";
+				"GENERATE_INFOPLIST_FILE" = "NO";
+				"SKIP_INSTALL" = "YES";
+				"APPLICATION_EXTENSION_API_ONLY" = "YES";
+				"CURRENT_PROJECT_VERSION" = "3";
+				"MARKETING_VERSION" = "0.1.0";
+				"DEVELOPMENT_TEAM" = "56MTG87283";
+				"TARGETED_DEVICE_FAMILY" = "1,2";
+				"LD_RUNPATH_SEARCH_PATHS" = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
+				"SWIFT_VERSION" = "5.0";
+			};
+		};
+		"B1183EA1761C490DAD21AAB0" = {
+			"isa" = "XCConfigurationList";
+			"buildConfigurations" = (
+				"EFEE3285153A4E20812E47F6",
+				"1F262316E4AD41EAB8B5559F",
+			);
+			"defaultConfigurationIsVisible" = "0";
+			"defaultConfigurationName" = "Release";
+		};
+		"26BD9625DDBF4FC2AF683C5A" = {
+			"isa" = "PBXSourcesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"F7D9CEB3B3894E7C8AA9A5C2" = {
+			"isa" = "PBXFrameworksBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"11A74B916E3D4D9797ADA59E" = {
+			"isa" = "PBXResourcesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"files" = (
+			);
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+		"50F2ECB3E642473A89C5AF86" = {
+			"isa" = "PBXNativeTarget";
+			"name" = "HermesNotificationService";
+			"productName" = "HermesNotificationService";
+			"productType" = "com.apple.product-type.app-extension";
+			"productReference" = "3D882A0C625E4A0FA071C23D";
+			"buildConfigurationList" = "B1183EA1761C490DAD21AAB0";
+			"buildPhases" = (
+				"26BD9625DDBF4FC2AF683C5A",
+				"F7D9CEB3B3894E7C8AA9A5C2",
+				"11A74B916E3D4D9797ADA59E",
+			);
+			"buildRules" = (
+			);
+			"dependencies" = (
+			);
+			"fileSystemSynchronizedGroups" = (
+				"7164A698C088403094159277",
+				"616038E2B9A64DF09CBE644D",
+			);
+		};
+		"D1F5F0C4AAC74975BCE58CD1" = {
+			"isa" = "PBXContainerItemProxy";
+			"containerPortal" = "F6F4DA8D93E88A08220E03B7";
+			"proxyType" = "1";
+			"remoteGlobalIDString" = "50F2ECB3E642473A89C5AF86";
+			"remoteInfo" = "HermesNotificationService";
+		};
+		"E8E7156AEB3248B381718E48" = {
+			"isa" = "PBXTargetDependency";
+			"target" = "50F2ECB3E642473A89C5AF86";
+			"targetProxy" = "D1F5F0C4AAC74975BCE58CD1";
+		};
+		"4E4DCEECF8C3420394EC39EF" = {
+			"isa" = "PBXBuildFile";
+			"fileRef" = "3D882A0C625E4A0FA071C23D";
+			"settings" = {
+				"ATTRIBUTES" = (
+					"RemoveHeadersOnCopy",
+				);
+			};
+		};
+		"F76E7EE1D3B44D45B820DBFA" = {
+			"isa" = "PBXCopyFilesBuildPhase";
+			"buildActionMask" = "2147483647";
+			"dstPath" = "";
+			"dstSubfolderSpec" = "13";
+			"files" = (
+				"4E4DCEECF8C3420394EC39EF",
+			);
+			"name" = "Embed App Extensions";
+			"runOnlyForDeploymentPostprocessing" = "0";
+		};
+	};
+	"rootObject" = "F6F4DA8D93E88A08220E03B7";
+}
