@@ -93,9 +93,11 @@ class BootstrapPathTests(unittest.TestCase):
     def test_same_interpreter_still_reexecs_into_isolated_mode(self):
         class Relaunch(Exception):
             pass
+        flags = {name: getattr(sys.flags, name) for name in dir(sys.flags)
+                 if not name.startswith('_') and isinstance(getattr(sys.flags, name), int)}
         with patch.object(bootstrap, 'hermes_python', return_value=os.path.abspath(sys.executable)), \
              patch.object(bootstrap.sys, 'argv', ['install.py', '--update']), \
-             patch.object(bootstrap.sys, 'flags', types.SimpleNamespace(isolated=False)), \
+             patch.object(bootstrap.sys, 'flags', types.SimpleNamespace(**{**flags, 'isolated': False})), \
              patch.object(bootstrap.os, 'execv', side_effect=Relaunch) as reexec:
             with self.assertRaises(Relaunch):
                 bootstrap.main()
