@@ -21,9 +21,9 @@ POLICY = {'protocol_version': 1, 'state_schema': 1}
 def managed_python():
     """Re-read the selected interpreter after each PM publication."""
     try:
-        from hermes_cli.main import PROJECT_ROOT
+        from pm.paths import repo_root
         from pm.environments import project_python
-        return str(project_python(PROJECT_ROOT))
+        return str(project_python(repo_root()))
     except ImportError:
         raise ValueError('This companion release requires Hermes package manager') from None
 
@@ -44,12 +44,16 @@ def run(args, *, home=None, log=None):
 
 
 def hermes(home, log, *args):
-    run([managed_python(), '-m', 'hermes_cli.main', *args], home=home, log=log)
+    executable = shutil.which('hermes')
+    command = [executable, *args] if executable else [managed_python(), '-m', 'hermes_cli.main', *args]
+    run(command, home=home, log=log)
 
 
 def native_install(home, commit, log):
+    # Staging homes and live copies are disabled before this call. Enabling
+    # below performs the PM admission; source preparation needs no consent.
     hermes(home, log, 'plugins', 'install', PLUGIN_SOURCE,
-           '--ref', commit, '--force', '--no-enable')
+           '--ref', commit, '--force', '--no-deps', '--no-enable')
 
 
 def installed_profiles():

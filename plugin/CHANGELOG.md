@@ -1,3 +1,10 @@
+## 0.17.1
+
+- Use Hermes' durable command for native plugin operations and read the selected Python environment without importing the interactive CLI.
+- Give native dependency consent a terminal and approve only the package pin in the verified release. Stop on other prompts, timeouts, stale workspaces, and release lookup errors with actionable diagnostics.
+- Add explicit completion of stopped first installations; preserve verified copies, install missing profile copies, and restore profile files, settings, and the PM graph on failure.
+- Prepare guided update copies while disabled through `--no-deps`, then let native enable operations admit the new package.
+
 ## 0.17.0
 
 - Publish the companion Python package from the repository root to PyPI; keep the installed directory plugin free of `pyproject.toml` and declare an exact package version in `plugin.yaml`.
