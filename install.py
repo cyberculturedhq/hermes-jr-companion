@@ -107,6 +107,17 @@ def python_command(python, args, root):
     raise ValueError('Unsupported installer Python command.')
 
 
+def bind_installation(root):
+    sys.path.insert(0, str(root))
+    # Activation can put a leased generation's console scripts first on PATH.
+    # Use the owning checkout's durable launcher in this installer and the
+    # signed updater children, preserving the rest of PATH for PM tools.
+    directory = root / '.hermes/bin'
+    launcher = directory / 'hermes'
+    if launcher.is_file() and os.access(launcher, os.X_OK):
+        os.environ['PATH'] = str(directory) + os.pathsep + os.environ.get('PATH', '')
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -458,7 +469,7 @@ def main():
     if os.path.abspath(sys.executable) != python or not sys.flags.isolated:
         os.execv(python, [python, '-I', str(Path(__file__).resolve()), *sys.argv[1:]])
     root = hermes_root(python)
-    sys.path.insert(0, str(root))
+    bind_installation(root)
     import fcntl
     from hermes_constants import get_default_hermes_root
     directory = get_default_hermes_root() / 'backups/hermes-jr-installer'

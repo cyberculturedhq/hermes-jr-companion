@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 import tempfile
 import types
@@ -57,6 +58,20 @@ class BootstrapPathTests(unittest.TestCase):
     def test_snapshot_interpreter_binds_to_its_owning_checkout(self):
         with patch.object(bootstrap.Path, 'home', return_value=self.home):
             self.assertEqual(bootstrap.hermes_root(str(self.environment / 'bin/python')), self.checkout)
+
+    def test_native_commands_prefer_the_owning_installation_launcher(self):
+        stable = self.checkout / '.hermes/bin/hermes'
+        older = self.install / 'environments/older/venv/bin/hermes'
+        for launcher in (stable, older):
+            launcher.parent.mkdir(parents=True)
+            launcher.write_text('#!/bin/sh\nexit 0\n')
+            launcher.chmod(0o755)
+        with patch.object(bootstrap.sys, 'path', sys.path.copy()), \
+             patch.dict(os.environ, {'PATH': str(older.parent) + os.pathsep + '/usr/bin'}):
+            bootstrap.bind_installation(self.checkout)
+            self.assertEqual(shutil.which('hermes'), str(stable))
+            self.assertIn('/usr/bin', os.environ['PATH'].split(os.pathsep))
+            self.assertEqual(sys.path[0], str(self.checkout))
 
     def test_unselected_generations_are_refused(self):
         old = self.install / 'environments/older/venv/bin/python'
