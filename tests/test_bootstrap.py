@@ -198,6 +198,8 @@ class BootstrapTests(unittest.TestCase):
                 (home / 'plugins/.install-metadata.json').write_text(json.dumps({'hermes-jr': {'source': bootstrap.SOURCE, 'revision': 'a' * 40}}))
                 (home / 'config.yaml').write_text('original settings\n')
             def command(args, **kwargs):
+                if len(args) > 5 and args[3].startswith('import sys,runpy;'):
+                    args = [args[0], '-m' if 'runpy.run_module' in args[3] else '-c', *args[5:]]
                 output=b''
                 if 'plugins' in args and 'install' in args:
                     native_home = Path(kwargs['env']['HERMES_HOME'])
@@ -209,7 +211,7 @@ class BootstrapTests(unittest.TestCase):
                     (candidate/'plugin.yaml').write_text('version: 0.15.0\n')
                     (candidate/'src/hermes_jr').mkdir(parents=True,exist_ok=True)
                     shutil.copy2(recovery_source,candidate/'src/hermes_jr/recovery.py')
-                elif args[1:3]==['-I','-c']:
+                elif args[1]=='-c' and args[2].startswith('import importlib.metadata;'):
                     output=b'0.15.0\n'
                 elif args[1:3]==['-m','hermes_jr.cli']:
                     action=args[3:]

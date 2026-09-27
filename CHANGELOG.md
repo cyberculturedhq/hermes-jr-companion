@@ -1,3 +1,9 @@
+## Installer bootstrap (main)
+
+- Isolate interpreter discovery, installer startup, and Python subprocess imports from inherited Python paths.
+- Bind selected workspace dependencies to the owning checkout recorded by Hermes PM, so each command reads the current environment after profile publication.
+- Keep the companion package at 0.17.1; this fix is delivered by downloading the current `install.py` and does not require a Hermes Agent update or messaging gateway restart.
+
 ## 0.17.1
 
 - Use Hermes' durable command for native plugin operations and read the selected Python environment without importing the interactive CLI.

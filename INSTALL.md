@@ -4,7 +4,7 @@ This is the current setup guide. When the user supplies a setup ticket, follow i
 
 ## 1. Prepare Hermes
 
-Run these commands together in one terminal call with timeout 300:
+Run these commands together in one terminal call. Allow at least an hour for the whole multi-profile installation and observe the same invocation until it exits; the installer separately limits each native command to five minutes.
 
 ```sh
 jr_setup_dir=$(mktemp -d)
@@ -13,6 +13,8 @@ python3 "$jr_setup_dir/install.py"
 ```
 
 The script installs when missing and checks an existing installation without updating, re-enabling profiles, or restarting it. Wait for this invocation to exit. `ready` returns the Hermes Python path. If it exits with an error or times out, stop and report the exact error and private log path. Do not retry, patch the downloaded installer, override Hermes runtime functions, or change Hermes source to finish setup. Collect the log and follow [STARTUP.md](STARTUP.md) to diagnose that specific problem. Updates require the user's explicit request and [UPDATES.md](UPDATES.md).
+
+Fetch `install.py` from the current `main` URL shown above. Its bootstrap starts Python in isolated mode and uses Hermes' recorded installation root, so inherited `PYTHONPATH` from an older Hermes conversation cannot select a retired PM workspace. This changes the installer process only; it does not clear the running gateway's environment, update Hermes Agent, or restart the messaging gateway. Reopening the interactive CLI/TUI after setup is a separate step to load the plugin for native pairing.
 
 If the backend is externally managed, verify its persistent supervisor and current `doctor` checks before continuing. A listening port alone does not prove it will survive a terminal closing. Preserve existing services and profile choices.
 

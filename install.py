@@ -2,6 +2,7 @@
 """Explicit Hermes Jr installer. Run with Python; never source this file in a shell."""
 import argparse
 import base64
+import hashlib
 import importlib.metadata
 import importlib.util
 import json
@@ -50,13 +51,60 @@ def hermes_python():
     candidates.append(str(Path.home() / '.hermes/hermes-agent/venv/bin/python'))
     for candidate in dict.fromkeys(p for p in candidates if p):
         try:
-            result = subprocess.run([candidate, '-c', 'import hermes_cli, hermes_constants, cryptography'],
+            result = subprocess.run([candidate, '-I', '-c', 'import hermes_cli, hermes_constants, cryptography'],
                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
             if result.returncode == 0:
                 return os.path.abspath(candidate)
         except (OSError, subprocess.TimeoutExpired):
             pass
     raise ValueError('Hermes Python was not found. Set HERMES_PYTHON to the Python executable that runs Hermes, then rerun this installer.')
+
+
+def hermes_root(python):
+    """Bind selected snapshot dependencies to their recorded owning checkout.
+
+    PM copies Hermes into each generation. Its package paths therefore identify
+    the snapshot, while the activation stamp identifies the stable installation
+    whose facts must be reread after native plugin operations publish a new venv.
+    """
+    prefix = Path(python).absolute().parent.parent.resolve()
+    for facts in sorted((Path.home() / '.hermes/installs').glob('*/facts.json')):
+        try:
+            recorded = json.loads(facts.read_text())['packages']['venv']['environment']
+            environment = Path(recorded).resolve()
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if prefix != environment:
+            continue
+        if not environment.is_relative_to((facts.parent / 'environments').resolve()):
+            raise ValueError('Hermes selected an environment outside its installation. Report the facts path: ' + str(facts))
+        try:
+            root = Path((facts.parent / 'inputs/.project-root').read_text().strip()).resolve()
+        except OSError:
+            raise ValueError('The Hermes installation identity stamp is missing. Report the facts path: ' + str(facts)) from None
+        if hashlib.sha256(str(root).encode()).hexdigest()[:16] != facts.parent.name or not root.is_dir():
+            raise ValueError('The Hermes installation identity stamp does not match its facts. Report the facts path: ' + str(facts))
+        if not (environment.parent / 'workspace/pm/uv.lock').is_file():
+            raise ValueError('The selected Hermes workspace is missing pm/uv.lock. Report the selected environment: ' + str(environment))
+        return root
+    if prefix.is_relative_to((Path.home() / '.hermes/installs').resolve()):
+        raise ValueError('This Hermes Python is an older, unselected generation. Report HERMES_PYTHON and the current facts.json selection.')
+    # A developer/external interpreter has no PM generation record.
+    from pm.paths import repo_root
+    return repo_root()
+
+
+def python_command(python, args, root):
+    """Ignore ambient imports and use the same checkout as the native launcher."""
+    args = list(args)
+    if args[:1] == ['-I']:
+        args.pop(0)
+    bootstrap = 'import sys,runpy; sys.path.insert(0,sys.argv.pop(1)); '
+    if args[:1] == ['-c']:
+        return [python, '-I', '-c', bootstrap + 'exec(sys.argv.pop(1))', str(root), *args[1:]]
+    if args[:1] == ['-m']:
+        return [python, '-I', '-c', bootstrap + "runpy.run_module(sys.argv.pop(1),run_name='__main__',alter_sys=True)", str(root), *args[1:]]
+    raise ValueError('Unsupported installer Python command.')
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -198,7 +246,7 @@ HANDOFF = ('Follow INSTALL.md step 2 with the phone ticket. The native Hermes pa
 
 
 def inspect(command):
-    result = subprocess.run([sys.executable, '-m', 'hermes_jr.cli', *command],
+    result = subprocess.run(python_command(sys.executable, ['-m', 'hermes_jr.cli', *command], hermes_root(sys.executable)),
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=45)
     if result.returncode:
         raise ValueError('The installed companion could not be checked. Follow STARTUP.md to diagnose it; no code was changed.')
@@ -248,7 +296,7 @@ def install(update=False, receipt=None, complete=False):
     from pm.plugin_declarations import read_python_declaration
 
     if not (repo_root() / 'pm/uv.lock').is_file():
-        raise ValueError('The active Hermes workspace is missing pm/uv.lock. The Hermes update did not rebuild this older workspace. Repair Hermes from its updated installation before retrying; do not patch the installer or workspace.')
+        raise ValueError('Hermes PM loaded from ' + str(repo_root()) + ' is missing pm/uv.lock. Report this path and the current facts.json selection before retrying.')
 
     def current_python():
         return str(project_python(repo_root()))
@@ -269,7 +317,7 @@ def install(update=False, receipt=None, complete=False):
         if managed_update:
             # An update spans multiple individually bounded native commands.
             # Keep its process group under the same cancellation authority.
-            code = native_command([current_python(), *args], env=env, log=log,
+            code = native_command(python_command(current_python(), args, repo_root()), env=env, log=log,
                                   requirement=f'hermes-jr-companion=={target}',
                                   timeout=3600, report_progress=True)
             if code:
@@ -277,7 +325,7 @@ def install(update=False, receipt=None, complete=False):
             return None
         if args[:2] == ['-m', 'hermes_cli.main']:
             executable = shutil.which('hermes')
-            command = [executable, *args[2:]] if executable else [current_python(), *args]
+            command = [executable, *args[2:]] if executable else python_command(current_python(), args, repo_root())
             print('Hermes ' + ' '.join(args[2:4]) + ': ' + str(home or 'current profile'), flush=True)
             try:
                 code = native_command(command, env=env, log=log, requirement=f'hermes-jr-companion=={target}')
@@ -287,7 +335,7 @@ def install(update=False, receipt=None, complete=False):
                 raise ValueError(f'Native Hermes {" ".join(args[2:4])} exited {code}. Inspect the private log: {log}')
             return None
         with log.open('ab') as output:
-            result = subprocess.run([current_python(), *args], env=env, stdout=subprocess.PIPE if capture else output,
+            result = subprocess.run(python_command(current_python(), args, repo_root()), env=env, stdout=subprocess.PIPE if capture else output,
                                     stderr=output, timeout=300)
         if result.returncode:
             raise ValueError('Installation command failed. Inspect the private log: ' + str(log))
@@ -407,8 +455,10 @@ def main():
     parser.add_argument('--complete-install', action='store_true', help='Complete a stopped initial installation of the current signed release across profiles')
     args = parser.parse_args()
     python = hermes_python()
-    if os.path.abspath(sys.executable) != python:
-        os.execv(python, [python, str(Path(__file__).resolve()), *sys.argv[1:]])
+    if os.path.abspath(sys.executable) != python or not sys.flags.isolated:
+        os.execv(python, [python, '-I', str(Path(__file__).resolve()), *sys.argv[1:]])
+    root = hermes_root(python)
+    sys.path.insert(0, str(root))
     import fcntl
     from hermes_constants import get_default_hermes_root
     directory = get_default_hermes_root() / 'backups/hermes-jr-installer'
