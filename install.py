@@ -8,12 +8,15 @@ import json
 import os
 from pathlib import Path
 import re
+import select
+import signal
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.request
+import urllib.error
 
 REPO = 'cyberculturedhq/hermes-jr-companion'
 SOURCE = 'https://github.com/' + REPO + '.git#plugin'
@@ -63,11 +66,95 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def get_json(path):
     request = urllib.request.Request(API + path, headers={'User-Agent': 'hermes-jr-installer', 'Accept': 'application/vnd.github+json'})
-    with urllib.request.build_opener(NoRedirect).open(request, timeout=20) as response:
-        raw = response.read(128001)
-        if len(raw) > 128000:
-            raise ValueError('Release response is too large.')
-        return json.loads(raw)
+    try:
+        with urllib.request.build_opener(NoRedirect).open(request, timeout=20) as response:
+            raw = response.read(128001)
+            if len(raw) > 128000:
+                raise ValueError('Release response is too large.')
+            return json.loads(raw)
+    except urllib.error.HTTPError as error:
+        if error.code == 429 or (error.code == 403 and (error.headers or {}).get('X-RateLimit-Remaining') == '0'):
+            raise ValueError('GitHub release lookup is rate limited. Wait for the GitHub rate limit to reset; do not patch or repeatedly rerun the installer.') from None
+        raise ValueError(f'GitHub release lookup failed with HTTP {error.code}. Keep the installation and report this error.') from None
+
+
+def native_command(command, *, env, log, requirement, timeout=300, report_progress=False):
+    """Provide the native consent gate a terminal and approve one verified requirement.
+
+    The caller has verified the release signature and dependency declaration.
+    No other question, security-scan override, or dependency list is approved.
+    """
+    import pty
+
+    master, slave = pty.openpty()
+    process = None
+    pending = b''
+    approved = False
+    progress = b''
+    prompt = b'Prepare these with Hermes through PM now? [y/N]:'
+    environment = {**env, 'TERM': 'dumb', 'NO_COLOR': '1', 'COLUMNS': '160'}
+    try:
+        process = subprocess.Popen(command, env=environment, stdin=slave, stdout=slave,
+                                   stderr=slave, start_new_session=True)
+        os.close(slave); slave = None
+        deadline = time.monotonic() + timeout
+        with log.open('ab') as output:
+            while True:
+                if time.monotonic() >= deadline:
+                    raise ValueError(f'Native Hermes command timed out after {timeout} seconds. Inspect the private log: {log}')
+                readable, _, _ = select.select([master], [], [], min(0.1, max(0, deadline - time.monotonic())))
+                if not readable:
+                    continue
+                try:
+                    chunk = os.read(master, 8192)
+                except OSError as error:
+                    if error.errno != 5:  # PTYs report EIO when the child closes its side.
+                        raise
+                    chunk = b''
+                if not chunk:
+                    break
+                output.write(chunk); output.flush()
+                if report_progress:
+                    progress += chunk
+                    lines = progress.split(b'\n')
+                    progress = lines.pop()[-4096:]
+                    for line in lines:
+                        line = re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]', b'', line).strip()
+                        if line.startswith(b'Hermes plugins '):
+                            print(line.decode('utf-8', errors='replace'), flush=True)
+                pending = (pending + chunk)[-65536:]
+                clean = re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]', b'', pending).replace(b'\r', b'')
+                if prompt in clean:
+                    section = clean.split(prompt, 1)[0].rsplit(b'hermes-jr declares Python dependencies:', 1)
+                    if approved and len(section) == 1:
+                        # Readline can redraw the same prompt after queued input.
+                        # Discard the redraw; never send another approval.
+                        pending = clean.split(prompt, 1)[1]
+                        continue
+                    dependencies = re.findall(rb'(?:^|\n)\s*-\s*([^\n]+)', section[-1]) if len(section) == 2 else []
+                    if approved or [item.strip() for item in dependencies] != [requirement.encode()]:
+                        raise ValueError(f'Native Hermes requested unexpected dependency consent. Inspect the private log: {log}')
+                    os.write(master, b'y\n')
+                    approved = True
+                    pending = clean.split(prompt, 1)[1]
+                elif b'[y/N]:' in clean or b'[Y/n]:' in clean:
+                    raise ValueError(f'Native Hermes requested a separate review. Inspect the private log: {log}')
+        return process.wait(timeout=max(0.1, deadline - time.monotonic()))
+    finally:
+        if process is not None:
+            # Stop only this invocation and its PM workers, including on Ctrl+C.
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+        os.close(master)
+        if slave is not None:
+            os.close(slave)
 
 
 def release():
@@ -137,27 +224,34 @@ def reuse(installed):
                       'reused': True, 'next_step': HANDOFF}), flush=True)
 
 
-def install(update=False, receipt=None):
+def install(update=False, receipt=None, complete=False):
+    if complete and (update or receipt):
+        raise ValueError('Use --update and --complete-install as separate steps.')
     if receipt and (not update or not re.fullmatch(r'[A-Za-z0-9_-]{1,2048}', receipt)):
         raise ValueError('An update receipt requires --update and must be a valid receipt from Jr.')
     try:
         installed = importlib.metadata.version('hermes-jr-companion')
     except importlib.metadata.PackageNotFoundError:
         installed = None
-    if installed and not update:
+    if installed and not update and not complete:
         return reuse(installed)
     if update and not installed:
         raise ValueError('No companion is installed. Run without --update for first installation.')
     selected = release()
     target, commit = selected['latest'], selected['commit']
-    if installed and version(installed) >= version(target) and not receipt:
+    if complete and installed and installed != target:
+        raise ValueError('The partial installation differs from the latest signed release. Run this installer with --update first, then --complete-install.')
+    if installed and version(installed) >= version(target) and not receipt and not complete:
         return reuse(installed)
-    from hermes_cli.main import PROJECT_ROOT
+    from pm.paths import repo_root
     from pm.environments import project_python
     from pm.plugin_declarations import read_python_declaration
 
+    if not (repo_root() / 'pm/uv.lock').is_file():
+        raise ValueError('The active Hermes workspace is missing pm/uv.lock. The Hermes update did not rebuild this older workspace. Repair Hermes from its updated installation before retrying; do not patch the installer or workspace.')
+
     def current_python():
-        return str(project_python(PROJECT_ROOT))
+        return str(project_python(repo_root()))
     homes = profiles()
     from hermes_constants import get_default_hermes_root
     backups = get_default_hermes_root() / 'backups/hermes-jr-installer'
@@ -167,11 +261,31 @@ def install(update=False, receipt=None):
     log.touch(mode=0o600)
     print('Installing Hermes Jr. ' + target + '. Private log: ' + str(log), flush=True)
 
-    def run(args, home=None, capture=False):
+    def run(args, home=None, capture=False, managed_update=False):
         env = os.environ.copy()
         env.pop('PYTHONPATH', None); env.pop('PYTHONHOME', None)
         if home is not None:
             env['HERMES_HOME'] = str(home)
+        if managed_update:
+            # An update spans multiple individually bounded native commands.
+            # Keep its process group under the same cancellation authority.
+            code = native_command([current_python(), *args], env=env, log=log,
+                                  requirement=f'hermes-jr-companion=={target}',
+                                  timeout=3600, report_progress=True)
+            if code:
+                raise ValueError(f'Managed update exited {code}. Inspect the private log: {log}')
+            return None
+        if args[:2] == ['-m', 'hermes_cli.main']:
+            executable = shutil.which('hermes')
+            command = [executable, *args[2:]] if executable else [current_python(), *args]
+            print('Hermes ' + ' '.join(args[2:4]) + ': ' + str(home or 'current profile'), flush=True)
+            try:
+                code = native_command(command, env=env, log=log, requirement=f'hermes-jr-companion=={target}')
+            except (OSError, subprocess.TimeoutExpired):
+                raise ValueError(f'Native Hermes {" ".join(args[2:4])} could not finish. Inspect the private log: {log}') from None
+            if code:
+                raise ValueError(f'Native Hermes {" ".join(args[2:4])} exited {code}. Inspect the private log: {log}')
+            return None
         with log.open('ab') as output:
             result = subprocess.run([current_python(), *args], env=env, stdout=subprocess.PIPE if capture else output,
                                     stderr=output, timeout=300)
@@ -180,7 +294,8 @@ def install(update=False, receipt=None):
         return result.stdout.decode() if capture else None
 
     def native(home):
-        run(['-m', 'hermes_cli.main', 'plugins', 'install', SOURCE, '--ref', commit, '--force', '--no-enable'], home)
+        flags = ['--no-deps'] if home == stage else []
+        run(['-m', 'hermes_cli.main', 'plugins', 'install', SOURCE, '--ref', commit, '--force', *flags, '--no-enable'], home)
 
     # Scan the signed plugin before changing an installed profile.
     stage = work / 'stage'; stage.mkdir(mode=0o700)
@@ -191,7 +306,7 @@ def install(update=False, receipt=None):
         raise ValueError('Native plugin version does not match the signed release.')
     if (candidate / 'pyproject.toml').exists() or read_python_declaration(candidate).install_requirements != (f'hermes-jr-companion=={target}',):
         raise ValueError('Native plugin does not pin the signed release package through Hermes PM.')
-    if installed:
+    if installed and not complete:
         # All explicit upgrades use the same managed updater and rollback record.
         # Load the verified candidate in a separate process so old updater versions
         # can also handle a release that only removes an unused dependency.
@@ -199,12 +314,12 @@ def install(update=False, receipt=None):
             code = ('import sys,json; sys.path.insert(0,sys.argv[1]); '
                     'from hermes_jr.update_requests import run_tracked; from hermes_jr.state import State; '
                     'run_tracked(State(),json.loads(sys.argv[2]),sys.argv[3])')
-            run(['-c', code, str(candidate / 'src'), json.dumps(selected), receipt])
+            run(['-c', code, str(candidate / 'src'), json.dumps(selected), receipt], managed_update=True)
         else:
             code = ('import sys,json; sys.path.insert(0,sys.argv[1]); '
                     'from hermes_jr.installer import install; from hermes_jr.state import State; '
                     'install(State(),json.loads(sys.argv[2]))')
-            run(['-c', code, str(candidate / 'src'), json.dumps(selected)])
+            run(['-c', code, str(candidate / 'src'), json.dumps(selected)], managed_update=True)
         print(json.dumps({'status': 'updated', 'version': target,
                           'message': 'The companion was updated. Existing profile choices and pairings were preserved.',
                           'next_step': 'Restart loaded Hermes sessions when idle, as described in UPDATES.md. Pairing is a separate action.'}), flush=True)
@@ -212,13 +327,34 @@ def install(update=False, receipt=None):
     # Recovery helper is from the native-scanned, signed candidate, and uses only stdlib.
     spec = importlib.util.spec_from_file_location('jr_recovery', candidate / 'src/hermes_jr/recovery.py')
     recovery = importlib.util.module_from_spec(spec); spec.loader.exec_module(recovery)
-    resources = [p for home in homes for p in (home / 'plugins/hermes-jr', home / 'plugins/.install-metadata.json')]
+    existing = set()
+    if complete:
+        def source_digest(path):
+            with tempfile.TemporaryDirectory(prefix='jr-completion-compare-') as temp:
+                tree = Path(temp) / 'source'
+                shutil.copytree(path, tree, symlinks=True, ignore=shutil.ignore_patterns(
+                    '__pycache__', '*.pyc', '*.pyo', '*.egg-info', 'build', 'dist', '.venv', '.git'))
+                return recovery.digest(tree)
+        expected = source_digest(candidate)
+        for home in homes:
+            plugin = home / 'plugins/hermes-jr'
+            if not plugin.exists():
+                continue
+            try:
+                entry = json.loads((home / 'plugins/.install-metadata.json').read_text())['hermes-jr']
+            except (OSError, ValueError, KeyError, TypeError):
+                raise ValueError('Cannot complete installation: existing plugin metadata is missing. Keep the copies and report the profile.') from None
+            if entry.get('source') != SOURCE or entry.get('revision') != commit or source_digest(plugin) != expected:
+                raise ValueError('Cannot complete installation: an existing copy differs from the signed release. Keep its files and report the profile.')
+            existing.add(home)
+    resources = [p for home in homes for p in (home / 'plugins/hermes-jr', home / 'plugins/.install-metadata.json', home / 'config.yaml')]
     snapshot = recovery.Snapshot.create(work / 'before', resources)
     # Preserve all existing files (including locally changed/legacy layouts) in that private backup.
     try:
         snapshot.ensure_unchanged('before')
         for home in homes:
-            native(home)
+            if home not in existing:
+                native(home)
         for home in homes:
             run(['-m', 'hermes_cli.main', 'plugins', 'enable', 'hermes-jr'], home)
         selected_version = run(['-I', '-c', 'import importlib.metadata; print(importlib.metadata.version("hermes-jr-companion"))'], capture=True).strip()
@@ -234,6 +370,11 @@ def install(update=False, receipt=None):
             except BaseException:
                 pass
         snapshot.restore(check_current=False)
+        # Restore the PM graph from the restored profile selections as well.
+        try:
+            run(['-c', 'import pm; pm.sync_venv(explicit=True)'])
+        except BaseException:
+            raise ValueError('Profile files and settings were restored, but Hermes dependency recovery failed. Keep setup stopped and inspect the private log: ' + str(log)) from None
         raise
     # New subprocesses import the installed package, never the previous in-memory version.
     state = json.loads(run(['-m', 'hermes_jr.cli', 'status'], capture=True))
@@ -263,6 +404,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--update', action='store_true', help='Install an explicitly requested update when Hermes work is idle')
     parser.add_argument('--receipt', help='Opaque Hermes Jr. update receipt; requires --update')
+    parser.add_argument('--complete-install', action='store_true', help='Complete a stopped initial installation of the current signed release across profiles')
     args = parser.parse_args()
     python = hermes_python()
     if os.path.abspath(sys.executable) != python:
@@ -274,7 +416,7 @@ def main():
     with (directory / 'install.lock').open('a') as handle:
         try: fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError: raise ValueError('Another Hermes Jr installer is running.') from None
-        install(update=args.update, receipt=args.receipt)
+        install(update=args.update, receipt=args.receipt, complete=args.complete_install)
 
 
 if __name__ == '__main__':

@@ -87,13 +87,15 @@ class BootstrapTests(unittest.TestCase):
         import contextlib,io,json,sys,tempfile,types
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
+            (root / 'pm').mkdir()
+            (root / 'pm/uv.lock').touch()
             pm = types.ModuleType('pm')
             envs = types.ModuleType('pm.environments')
             envs.project_python = lambda _: Path(sys.executable)
             declarations = types.ModuleType('pm.plugin_declarations')
             declarations.read_python_declaration = lambda _: types.SimpleNamespace(install_requirements=('hermes-jr-companion==0.15.0',))
-            main = types.ModuleType('hermes_cli.main')
-            main.PROJECT_ROOT = root
+            paths = types.ModuleType('pm.paths')
+            paths.repo_root = lambda: root
             def command(args, **kwargs):
                 if 'plugins' in args and 'install' in args:
                     candidate = Path(kwargs['env']['HERMES_HOME']) / 'plugins/hermes-jr'
@@ -102,37 +104,108 @@ class BootstrapTests(unittest.TestCase):
                 return types.SimpleNamespace(returncode=0, stdout=b'')
             constants = types.SimpleNamespace(get_default_hermes_root=lambda:root)
             output=io.StringIO()
-            with patch.dict(sys.modules, {'hermes_constants':constants, 'hermes_cli.main':main,
+            native_calls=[]
+            def native(args, **kwargs):
+                native_calls.append((args, kwargs))
+                return command(args, env=kwargs['env']).returncode
+            with patch.dict(sys.modules, {'hermes_constants':constants, 'hermes_cli.main':None, 'pm.paths':paths,
                                           'pm':pm, 'pm.environments':envs, 'pm.plugin_declarations':declarations}), \
                  patch.object(bootstrap.importlib.metadata,'version',return_value='0.14.0'), \
                  patch.object(bootstrap,'release',return_value={'latest':'0.15.0','commit':'a'*40,'signature':'fixture','state':'available'}), \
                  patch.object(bootstrap,'profiles',return_value=[]), \
                  patch.object(bootstrap.subprocess,'run',side_effect=command) as run, \
+                 patch.object(bootstrap,'native_command',side_effect=native), \
                  patch.object(bootstrap,'reuse') as reuse, contextlib.redirect_stdout(output):
                 bootstrap.install(update=True, receipt=receipt)
                 reuse.assert_not_called()
                 self.assertEqual(json.loads(output.getvalue().splitlines()[-1])['status'],'updated')
-                calls=[c.args[0] for c in run.call_args_list]
+                calls=[args for args, _ in native_calls]
                 imported = 'from hermes_jr.update_requests import run_tracked' if receipt else 'from hermes_jr.installer import install'
                 self.assertTrue(any(imported in str(c) and (not receipt or c[-1] == receipt) for c in calls))
+                self.assertTrue(any(kwargs.get('timeout') == 3600 and kwargs.get('report_progress')
+                                    for _, kwargs in native_calls))
                 self.assertFalse(any('enable' in c for c in calls))
 
     def test_fresh_install_reaches_supervised_startup_and_ready(self):
+        self.check_initial_install()
+
+    def test_completion_keeps_verified_copies_and_installs_missing_profiles(self):
+        self.check_initial_install(complete=True)
+
+    def test_completion_restores_files_and_settings_after_a_failure(self):
+        self.check_initial_install(complete=True, failure=True)
+
+    def test_completion_refuses_local_source_changes(self):
+        self.check_initial_install(complete=True, changed=True)
+
+    def test_completion_and_update_are_separate_actions(self):
+        with self.assertRaisesRegex(ValueError, 'separate steps'):
+            bootstrap.install(update=True, complete=True)
+
+    def test_completion_of_an_older_package_requires_an_explicit_update(self):
+        with patch.object(bootstrap.importlib.metadata, 'version', return_value='0.17.0'), \
+             patch.object(bootstrap, 'release', return_value={'latest': '0.17.1', 'commit': 'a' * 40}), \
+             patch.object(bootstrap, 'native_command') as commands:
+            with self.assertRaisesRegex(ValueError, '--update first'):
+                bootstrap.install(complete=True)
+            commands.assert_not_called()
+
+    def test_missing_pm_lock_stops_before_publication(self):
+        import sys, tempfile, types
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            paths = types.ModuleType('pm.paths'); paths.repo_root = lambda: root
+            environments = types.ModuleType('pm.environments'); environments.project_python = lambda _: Path(sys.executable)
+            declarations = types.ModuleType('pm.plugin_declarations'); declarations.read_python_declaration = lambda _: None
+            with patch.dict(sys.modules, {'pm': types.ModuleType('pm'), 'pm.paths': paths,
+                                          'pm.environments': environments, 'pm.plugin_declarations': declarations}), \
+                 patch.object(bootstrap.importlib.metadata, 'version', side_effect=bootstrap.importlib.metadata.PackageNotFoundError), \
+                 patch.object(bootstrap, 'release', return_value={'latest': '0.17.1', 'commit': 'a' * 40}), \
+                 patch.object(bootstrap, 'native_command') as commands:
+                with self.assertRaisesRegex(ValueError, 'missing pm/uv.lock'):
+                    bootstrap.install()
+                commands.assert_not_called()
+
+    def test_rate_limited_release_lookup_reports_the_cause(self):
+        import urllib.error
+        error = urllib.error.HTTPError(bootstrap.API, 403, 'Forbidden', {'X-RateLimit-Remaining': '0'}, None)
+        with patch.object(bootstrap.urllib.request, 'build_opener') as opener:
+            opener.return_value.open.side_effect = error
+            with self.assertRaisesRegex(ValueError, 'rate limited'):
+                bootstrap.get_json('/releases/latest')
+
+    def check_initial_install(self, complete=False, failure=False, changed=False):
         import contextlib,io,json,shutil,sys,tempfile,types
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);home=root/'home';home.mkdir()
+            (root / 'pm').mkdir()
+            (root / 'pm/uv.lock').touch()
             pm = types.ModuleType('pm')
             envs = types.ModuleType('pm.environments')
             envs.project_python = lambda _: Path(sys.executable)
             declarations = types.ModuleType('pm.plugin_declarations')
             declarations.read_python_declaration = lambda _: types.SimpleNamespace(install_requirements=('hermes-jr-companion==0.15.0',))
-            main = types.ModuleType('hermes_cli.main')
-            main.PROJECT_ROOT = root
+            paths = types.ModuleType('pm.paths')
+            paths.repo_root = lambda: root
             recovery_source=repo/'plugin/src/hermes_jr/recovery.py' if (repo/'plugin').exists() else repo/'src/hermes_jr/recovery.py'
+            homes = [home, root / 'other'] if complete else [home]
+            native_homes = []
+            if complete:
+                plugin = home / 'plugins/hermes-jr'
+                (plugin / 'src/hermes_jr').mkdir(parents=True)
+                (plugin / 'plugin.yaml').write_text('version: 0.15.0\n' + ('description: local edit\n' if changed else ''))
+                shutil.copy2(recovery_source, plugin / 'src/hermes_jr/recovery.py')
+                (home / 'plugins/.install-metadata.json').write_text(json.dumps({'hermes-jr': {'source': bootstrap.SOURCE, 'revision': 'a' * 40}}))
+                (home / 'config.yaml').write_text('original settings\n')
             def command(args, **kwargs):
                 output=b''
                 if 'plugins' in args and 'install' in args:
-                    candidate=Path(kwargs['env']['HERMES_HOME'])/'plugins/hermes-jr';candidate.mkdir(parents=True,exist_ok=True)
+                    native_home = Path(kwargs['env']['HERMES_HOME'])
+                    native_homes.append(native_home)
+                    if failure and native_home == homes[-1]:
+                        (home / 'config.yaml').write_text('installation changed settings\n')
+                        raise ValueError('injected installation failure')
+                    candidate=native_home/'plugins/hermes-jr';candidate.mkdir(parents=True,exist_ok=True)
                     (candidate/'plugin.yaml').write_text('version: 0.15.0\n')
                     (candidate/'src/hermes_jr').mkdir(parents=True,exist_ok=True)
                     shutil.copy2(recovery_source,candidate/'src/hermes_jr/recovery.py')
@@ -148,14 +221,26 @@ class BootstrapTests(unittest.TestCase):
                 return types.SimpleNamespace(returncode=0,stdout=output)
             constants=types.SimpleNamespace(get_default_hermes_root=lambda:root)
             output=io.StringIO()
-            with patch.dict(sys.modules,{'hermes_constants':constants, 'hermes_cli.main':main,
+            installed = {'return_value': '0.15.0'} if complete else {'side_effect': bootstrap.importlib.metadata.PackageNotFoundError}
+            with patch.dict(sys.modules,{'hermes_constants':constants, 'hermes_cli.main':None, 'pm.paths':paths,
                                          'pm':pm, 'pm.environments':envs, 'pm.plugin_declarations':declarations}), \
-                 patch.object(bootstrap.importlib.metadata,'version',side_effect=bootstrap.importlib.metadata.PackageNotFoundError), \
+                 patch.object(bootstrap.importlib.metadata,'version',**installed), \
                  patch.object(bootstrap,'release',return_value={'latest':'0.15.0','commit':'a'*40,'signature':'fixture','state':'available'}), \
-                 patch.object(bootstrap,'profiles',return_value=[home]), \
+                 patch.object(bootstrap,'profiles',return_value=homes), \
                  patch.object(bootstrap.subprocess,'run',side_effect=command) as run, contextlib.redirect_stdout(output):
-                bootstrap.install()
+                with patch.object(bootstrap,'native_command',side_effect=lambda args, **kwargs: command(args, env=kwargs['env']).returncode):
+                    if failure or changed:
+                        message = 'differs from the signed release' if changed else 'injected installation failure'
+                        with self.assertRaisesRegex(ValueError, message):
+                            bootstrap.install(complete=complete)
+                        self.assertEqual((home / 'config.yaml').read_text(), 'original settings\n')
+                        self.assertFalse((homes[-1] / 'plugins/hermes-jr').exists())
+                        return
+                    bootstrap.install(complete=complete)
             self.assertEqual(json.loads(output.getvalue().splitlines()[-1])['status'],'ready')
+            if complete:
+                self.assertNotIn(home, native_homes)
+                self.assertIn(homes[-1], native_homes)
             calls=[c.args[0] for c in run.call_args_list]
             self.assertTrue(any(c[-2:]==['backend','install'] for c in calls))
             self.assertTrue(any(c[-2:]==['service','install'] for c in calls))

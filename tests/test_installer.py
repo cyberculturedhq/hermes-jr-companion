@@ -15,6 +15,19 @@ from hermes_jr.state import State
 
 
 class InstallerTests(unittest.TestCase):
+    def test_managed_python_does_not_import_the_cli_launcher(self):
+        import sys
+        import types
+        root = Path('/fixture/hermes')
+        paths = types.ModuleType('pm.paths')
+        paths.repo_root = lambda: root
+        environments = types.ModuleType('pm.environments')
+        environments.project_python = Mock(return_value=Path('/fixture/python'))
+        with patch.dict(sys.modules, {'pm': types.ModuleType('pm'), 'pm.paths': paths,
+                                      'pm.environments': environments, 'hermes_cli.main': None}):
+            self.assertEqual(installer.managed_python(), '/fixture/python')
+        environments.project_python.assert_called_once_with(root)
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
