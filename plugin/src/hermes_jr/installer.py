@@ -46,6 +46,7 @@ def run(args, *, home=None, log=None):
 def hermes(home, log, *args):
     executable = shutil.which('hermes')
     command = [executable, *args] if executable else [managed_python(), '-m', 'hermes_cli.main', *args]
+    print('Hermes ' + ' '.join(args[:2]) + ': ' + str(home), flush=True)
     run(command, home=home, log=log)
 
 

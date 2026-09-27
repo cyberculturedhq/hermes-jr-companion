@@ -1,5 +1,7 @@
 """Exercise native dependency consent and cancellation with real subprocesses."""
 import os
+import contextlib
+import io
 from pathlib import Path
 import sys
 import tempfile
@@ -61,3 +63,14 @@ class NativeConsentTests(unittest.TestCase):
     def test_nonzero_exit_is_returned_with_diagnostics_in_the_log(self):
         self.assertEqual(self.run_native("import sys; print('native failure'); sys.exit(7)"), 7)
         self.assertIn(b'native failure', self.log.read_bytes())
+
+    def test_managed_progress_is_forwarded_without_dumping_the_private_log(self):
+        output = io.StringIO()
+        code = "print('private diagnostic'); print('Hermes plugins install: /fixture/home')"
+        with contextlib.redirect_stdout(output):
+            result = bootstrap.native_command([sys.executable, '-u', '-c', code],
+                       env=os.environ.copy(), log=self.log,
+                       requirement='hermes-jr-companion==0.17.0', report_progress=True)
+        self.assertEqual(result, 0)
+        self.assertEqual(output.getvalue().strip(), 'Hermes plugins install: /fixture/home')
+        self.assertIn(b'private diagnostic', self.log.read_bytes())

@@ -104,20 +104,26 @@ class BootstrapTests(unittest.TestCase):
                 return types.SimpleNamespace(returncode=0, stdout=b'')
             constants = types.SimpleNamespace(get_default_hermes_root=lambda:root)
             output=io.StringIO()
+            native_calls=[]
+            def native(args, **kwargs):
+                native_calls.append((args, kwargs))
+                return command(args, env=kwargs['env']).returncode
             with patch.dict(sys.modules, {'hermes_constants':constants, 'hermes_cli.main':None, 'pm.paths':paths,
                                           'pm':pm, 'pm.environments':envs, 'pm.plugin_declarations':declarations}), \
                  patch.object(bootstrap.importlib.metadata,'version',return_value='0.14.0'), \
                  patch.object(bootstrap,'release',return_value={'latest':'0.15.0','commit':'a'*40,'signature':'fixture','state':'available'}), \
                  patch.object(bootstrap,'profiles',return_value=[]), \
                  patch.object(bootstrap.subprocess,'run',side_effect=command) as run, \
-                 patch.object(bootstrap,'native_command',side_effect=lambda args, **kwargs: command(args, env=kwargs['env']).returncode), \
+                 patch.object(bootstrap,'native_command',side_effect=native), \
                  patch.object(bootstrap,'reuse') as reuse, contextlib.redirect_stdout(output):
                 bootstrap.install(update=True, receipt=receipt)
                 reuse.assert_not_called()
                 self.assertEqual(json.loads(output.getvalue().splitlines()[-1])['status'],'updated')
-                calls=[c.args[0] for c in run.call_args_list]
+                calls=[args for args, _ in native_calls]
                 imported = 'from hermes_jr.update_requests import run_tracked' if receipt else 'from hermes_jr.installer import install'
                 self.assertTrue(any(imported in str(c) and (not receipt or c[-1] == receipt) for c in calls))
+                self.assertTrue(any(kwargs.get('timeout') == 3600 and kwargs.get('report_progress')
+                                    for _, kwargs in native_calls))
                 self.assertFalse(any('enable' in c for c in calls))
 
     def test_fresh_install_reaches_supervised_startup_and_ready(self):

@@ -78,7 +78,7 @@ def get_json(path):
         raise ValueError(f'GitHub release lookup failed with HTTP {error.code}. Keep the installation and report this error.') from None
 
 
-def native_command(command, *, env, log, requirement, timeout=300):
+def native_command(command, *, env, log, requirement, timeout=300, report_progress=False):
     """Provide the native consent gate a terminal and approve one verified requirement.
 
     The caller has verified the release signature and dependency declaration.
@@ -90,6 +90,7 @@ def native_command(command, *, env, log, requirement, timeout=300):
     process = None
     pending = b''
     approved = False
+    progress = b''
     prompt = b'Prepare these with Hermes through PM now? [y/N]:'
     environment = {**env, 'TERM': 'dumb', 'NO_COLOR': '1', 'COLUMNS': '160'}
     try:
@@ -113,6 +114,14 @@ def native_command(command, *, env, log, requirement, timeout=300):
                 if not chunk:
                     break
                 output.write(chunk); output.flush()
+                if report_progress:
+                    progress += chunk
+                    lines = progress.split(b'\n')
+                    progress = lines.pop()[-4096:]
+                    for line in lines:
+                        line = re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]', b'', line).strip()
+                        if line.startswith(b'Hermes plugins '):
+                            print(line.decode('utf-8', errors='replace'), flush=True)
                 pending = (pending + chunk)[-65536:]
                 clean = re.sub(rb'\x1b\[[0-?]*[ -/]*[@-~]', b'', pending).replace(b'\r', b'')
                 if prompt in clean:
@@ -252,11 +261,20 @@ def install(update=False, receipt=None, complete=False):
     log.touch(mode=0o600)
     print('Installing Hermes Jr. ' + target + '. Private log: ' + str(log), flush=True)
 
-    def run(args, home=None, capture=False):
+    def run(args, home=None, capture=False, managed_update=False):
         env = os.environ.copy()
         env.pop('PYTHONPATH', None); env.pop('PYTHONHOME', None)
         if home is not None:
             env['HERMES_HOME'] = str(home)
+        if managed_update:
+            # An update spans multiple individually bounded native commands.
+            # Keep its process group under the same cancellation authority.
+            code = native_command([current_python(), *args], env=env, log=log,
+                                  requirement=f'hermes-jr-companion=={target}',
+                                  timeout=3600, report_progress=True)
+            if code:
+                raise ValueError(f'Managed update exited {code}. Inspect the private log: {log}')
+            return None
         if args[:2] == ['-m', 'hermes_cli.main']:
             executable = shutil.which('hermes')
             command = [executable, *args[2:]] if executable else [current_python(), *args]
@@ -296,12 +314,12 @@ def install(update=False, receipt=None, complete=False):
             code = ('import sys,json; sys.path.insert(0,sys.argv[1]); '
                     'from hermes_jr.update_requests import run_tracked; from hermes_jr.state import State; '
                     'run_tracked(State(),json.loads(sys.argv[2]),sys.argv[3])')
-            run(['-c', code, str(candidate / 'src'), json.dumps(selected), receipt])
+            run(['-c', code, str(candidate / 'src'), json.dumps(selected), receipt], managed_update=True)
         else:
             code = ('import sys,json; sys.path.insert(0,sys.argv[1]); '
                     'from hermes_jr.installer import install; from hermes_jr.state import State; '
                     'install(State(),json.loads(sys.argv[2]))')
-            run(['-c', code, str(candidate / 'src'), json.dumps(selected)])
+            run(['-c', code, str(candidate / 'src'), json.dumps(selected)], managed_update=True)
         print(json.dumps({'status': 'updated', 'version': target,
                           'message': 'The companion was updated. Existing profile choices and pairings were preserved.',
                           'next_step': 'Restart loaded Hermes sessions when idle, as described in UPDATES.md. Pairing is a separate action.'}), flush=True)
