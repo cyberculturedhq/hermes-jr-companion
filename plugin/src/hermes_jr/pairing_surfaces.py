@@ -7,9 +7,20 @@ fail closed on unsupported versions. Never import/start a second gateway.
 from __future__ import annotations
 
 import queue
+import inspect
 import sys
 import threading
 import uuid
+
+
+def clarification_params(question, choices):
+    """Choose the loaded gateway's wire shape without importing another gateway."""
+    registry = sys.modules.get("tui_gateway.contracts.registry")
+    contract = getattr(registry, "SERVER_REQUESTS", {}).get("clarify")
+    fields = getattr(getattr(contract, "params", None), "model_fields", {})
+    if "questions" in fields and "question" not in fields:
+        return {"questions": [{"qid": "q1", "question": question, "choices": choices}]}
+    return {"question": question, "choices": choices}
 
 
 class ClassicPanel:
@@ -18,6 +29,11 @@ class ClassicPanel:
         self.responses = queue.Queue()
         self.panel = None
         self.closed = False
+        callback = getattr(cli, "_clarify_callback", None)
+        parameters = inspect.signature(callback).parameters if callable(callback) else {}
+        self.batch = "questions" in parameters and "question" not in parameters
+        if self.batch and not callable(getattr(cli, "_clarify_batch_set_active", None)):
+            raise ValueError("Unsupported CLI")
         if not all(callable(getattr(cli, name, None)) for name in ("_paint_now", "_clarify_teardown", "_ring_bell")):
             raise ValueError("Unsupported CLI")
         if not getattr(getattr(cli, "_app", None), "loop", None):
@@ -50,6 +66,11 @@ class ClassicPanel:
                     raise ValueError("Another question is already open")
                 self.panel = {"question": text, "choices": ["Cancel pairing"], "selected": 0,
                               "multi_select": False, "selected_indices": None, "response_queue": self.responses}
+                if self.batch:
+                    self.panel.update(questions=[{"qid": "q1", "question": text,
+                                      "choices": ["Cancel pairing"], "multi_select": False}],
+                                      answers={}, answer_meta={}, active=0)
+                    cli._clarify_batch_set_active(self.panel, 0)
                 cli._clarify_state = self.panel
                 cli._clarify_deadline = None
                 cli._clarify_freetext = False
@@ -59,6 +80,8 @@ class ClassicPanel:
                 self.closed = True
                 return
             self.panel["question"] = text
+            if self.batch:
+                self.panel["questions"][0]["question"] = text
             cli._paint_now()
         self.on_ui(update)
 
@@ -87,7 +110,7 @@ class GatewayPanel:
         if callable(getattr(self.requests, "open_requests", None)) and self.requests.open_requests(self.sid):
             raise ValueError("Another question is already open")
         self.settle = self.requests.send_async("clarify", self.sid,
-            {"question": text, "choices": ["Cancel pairing"]}, self.responses.put)
+            clarification_params(text, ["Cancel pairing"]), self.responses.put)
 
     def cancelled(self):
         return not self.responses.empty()

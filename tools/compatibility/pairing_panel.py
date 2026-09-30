@@ -5,7 +5,6 @@ Run with Hermes' Python, passing a clean Hermes checkout. All state is disposabl
 import argparse
 import asyncio
 import json
-import inspect
 import os
 from pathlib import Path
 import shlex
@@ -14,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 from types import SimpleNamespace
+from support import bind_request_sinks
 
 parser = argparse.ArgumentParser()
 parser.add_argument('upstream', type=Path)
@@ -137,26 +137,37 @@ async def desktop():
     sid, durable = 'desktop-panel-fixture', 'desktop-durable-fixture'
     with server._sessions_lock:
         server._sessions[sid] = {'session_key': durable}
-    if len(inspect.signature(server_requests.bind_sinks).parameters) == 3:
-        server_requests.bind_sinks(frames.append, lambda *event: events.append(event), lambda _: True)
-    else:
-        server_requests.bind_sinks(frames.append, lambda *event: events.append(event))
-    identity = job(3)
-    pending = asyncio.create_task(asyncio.to_thread(command, identity, durable))
-    for _ in range(100):
-        if pending.done(): raise AssertionError(pending.result())
-        if frames: break
-        await asyncio.sleep(.05)
-    assert frames[-1]['method'] == 'clarify'
-    assert frames[-1]['params']['session_id'] == sid
-    assert '1234 5678 9012' in frames[-1]['params']['question']
-    setup_jobs.publish(state, identity, 'connected')
-    result = json.loads(await asyncio.wait_for(pending, 5))
-    assert json.loads(result['output'])['status'] == 'connected'
-    assert events[-1] == ('request.cancel', sid, {'id': frames[-1]['id'], 'method': 'clarify', 'reason': 'resolved'})
-    assert not server_requests.resolve_response({'id': frames[-1]['id'], 'result': {'answer': 'Cancel pairing'}})
-    assert setup_jobs.result(state, identity)['status'] == 'connected'
-    report('PASS real desktop gateway: owning conversation, native question, automatic dismissal, late-answer rejection')
+    bind_request_sinks(server_requests, frames.append, lambda *event: events.append(event))
+    for number, cancel in [(3, False), (4, True)]:
+        frames.clear()
+        identity = job(number)
+        pending = asyncio.create_task(asyncio.to_thread(command, identity, durable))
+        for _ in range(100):
+            if pending.done(): raise AssertionError(pending.result())
+            if frames: break
+            await asyncio.sleep(.05)
+        frame = frames[-1]
+        assert frame['method'] == 'clarify'
+        assert frame['params']['session_id'] == sid
+        questions = frame['params'].get('questions')
+        question = questions[0] if questions else frame['params']
+        assert '1234 5678 9012' in question['question']
+        assert question['choices'] == ['Cancel pairing']
+        answer = {'answers': {question['qid']: 'Cancel pairing'}} if questions else {'answer': 'Cancel pairing'}
+        if cancel:
+            assert server_requests.resolve_response({'id': frame['id'], 'result': answer})
+        else:
+            setup_jobs.publish(state, identity, 'connected')
+        result = json.loads(await asyncio.wait_for(pending, 5))
+        value = json.loads(result['output'])
+        assert value.get('reason') == 'cancelled' if cancel else value['status'] == 'connected', result
+        if not cancel:
+            assert events[-1] == ('request.cancel', sid, {'id': frame['id'], 'method': 'clarify', 'reason': 'resolved'})
+        assert not server_requests.open_requests(sid)
+        assert not server_requests.resolve_response({'id': frame['id'], 'result': answer})
+        final = setup_jobs.result(state, identity)
+        assert final.get('reason') == 'cancelled' if cancel else final['status'] == 'connected', final
+    report('PASS real desktop gateway: owning conversation, native question, automatic dismissal, cancellation, late-answer rejection')
 
 
 async def legacy_desktop(server):

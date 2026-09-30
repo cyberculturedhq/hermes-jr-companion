@@ -31,6 +31,7 @@ socket.socket.connect = denied
 socket.create_connection = denied
 sys.path.insert(0, str(root))
 from hermes_jr.mobile import MobileAdapter, PREFIX
+from hermes_jr.pairing_surfaces import clarification_params
 from tui_gateway import server
 
 if args.production_contracts:
@@ -106,16 +107,29 @@ else:
     from tui_gateway import server_requests
     for kind, params, answer in [
         ('approval', {'request_id': 'approval-id', 'command': 'fixture only', 'choices': ['once', 'deny']}, {'choice': 'deny', 'all': False}),
-        ('clarify', {'question': 'Which?', 'choices': ['A', 'B']}, {'answer': 'A'}),
+        ('clarify', clarification_params('Which?', ['A', 'B']), {'answer': 'A'}),
     ]:
         frames, results = [], []
         with patch.object(server_requests, '_write', frames.append):
-            settle = server_requests.send_async(kind, sid, params, results.append)
+            questions = params.get('questions')
+            if questions:
+                # The mobile adapter locks questions by qid. send_async does
+                # not install those locks; construct the real batch request.
+                req = server_requests.ServerRequest(sid, kind, params,
+                    qids=[q['qid'] for q in questions])
+                server_requests._register(req)
+            else:
+                settle = server_requests.send_async(kind, sid, params, results.append)
             card = adapter.incoming(frames[-1])
             public_id = card['params']['payload']['request_id']
-            rpc(kind + '.respond', {'session_id': sid, 'request_id': public_id, **answer})
-            assert results == [answer], results
-            settle('fixture complete')
+            question_id = {'question_id': questions[0]['qid']} if questions else {}
+            rpc(kind + '.respond', {'session_id': sid, 'request_id': public_id, **question_id, **answer})
+            if questions:
+                assert req.result['answers'] == {questions[0]['qid']: answer['answer']}, req.result
+                assert req.result.get('outcome', 'submitted') == 'submitted', req.result
+            else:
+                assert results == [answer], results
+                settle('fixture complete')
     frames = []
     batch = server_requests.ServerRequest(sid, 'clarify', {'questions': [
         {'qid': 'q1', 'question': 'First?'}, {'qid': 'q2', 'question': 'Second?'}]}, qids=['q1', 'q2'])
@@ -127,6 +141,7 @@ else:
         assert first['remaining'] == ['q2']
         second = rpc('clarify.respond', {'session_id': sid, 'request_id': public_id, 'question_id': 'q2', 'answer': 'B'})
         assert second['remaining'] == [] and public_id not in adapter.interactions
-        assert batch.result == {'answers': {'q1': 'A', 'q2': 'B'}}
+        assert batch.result['answers'] == {'q1': 'A', 'q2': 'B'}, batch.result
+        assert batch.result.get('outcome', 'submitted') == 'submitted', batch.result
         server_requests.cancel(sid)
 print('PASS: real Hermes mobile compatibility checks complete')
