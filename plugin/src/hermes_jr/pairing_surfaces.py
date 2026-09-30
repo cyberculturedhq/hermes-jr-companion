@@ -7,9 +7,20 @@ fail closed on unsupported versions. Never import/start a second gateway.
 from __future__ import annotations
 
 import queue
+import inspect
 import sys
 import threading
 import uuid
+
+
+def clarification_params(question, choices):
+    """Choose the loaded gateway's wire shape without importing another gateway."""
+    registry = sys.modules.get("tui_gateway.contracts.registry")
+    contract = getattr(registry, "SERVER_REQUESTS", {}).get("clarify")
+    fields = getattr(getattr(contract, "params", None), "model_fields", {})
+    if "questions" in fields and "question" not in fields:
+        return {"questions": [{"qid": "q1", "question": question, "choices": choices}]}
+    return {"question": question, "choices": choices}
 
 
 class ClassicPanel:
@@ -18,6 +29,11 @@ class ClassicPanel:
         self.responses = queue.Queue()
         self.panel = None
         self.closed = False
+        callback = getattr(cli, "_clarify_callback", None)
+        parameters = inspect.signature(callback).parameters if callable(callback) else {}
+        self.batch = "questions" in parameters and "question" not in parameters
+        if self.batch and not callable(getattr(cli, "_clarify_batch_set_active", None)):
+            raise ValueError("Unsupported CLI")
         if not all(callable(getattr(cli, name, None)) for name in ("_paint_now", "_clarify_teardown", "_ring_bell")):
             raise ValueError("Unsupported CLI")
         if not getattr(getattr(cli, "_app", None), "loop", None):
@@ -50,6 +66,11 @@ class ClassicPanel:
                     raise ValueError("Another question is already open")
                 self.panel = {"question": text, "choices": ["Cancel pairing"], "selected": 0,
                               "multi_select": False, "selected_indices": None, "response_queue": self.responses}
+                if self.batch:
+                    self.panel.update(questions=[{"qid": "q1", "question": text,
+                                      "choices": ["Cancel pairing"], "multi_select": False}],
+                                      answers={}, answer_meta={}, active=0)
+                    cli._clarify_batch_set_active(self.panel, 0)
                 cli._clarify_state = self.panel
                 cli._clarify_deadline = None
                 cli._clarify_freetext = False
@@ -59,6 +80,8 @@ class ClassicPanel:
                 self.closed = True
                 return
             self.panel["question"] = text
+            if self.batch:
+                self.panel["questions"][0]["question"] = text
             cli._paint_now()
         self.on_ui(update)
 
@@ -79,20 +102,50 @@ class GatewayPanel:
         self.requests, self.sid = requests, sid
         self.responses = queue.Queue()
         self.settle = None
+        self.batch_request = None
         if callable(getattr(requests, "open_requests", None)) and requests.open_requests(sid):
             raise ValueError("Another question is already open")
 
     def show(self, text):
         self.close()
+        if self.cancelled():
+            return
         if callable(getattr(self.requests, "open_requests", None)) and self.requests.open_requests(self.sid):
             raise ValueError("Another question is already open")
-        self.settle = self.requests.send_async("clarify", self.sid,
-            {"question": text, "choices": ["Cancel pairing"]}, self.responses.put)
+        params = clarification_params(text, ["Cancel pairing"])
+        if "questions" in params:
+            requests = self.requests
+            if not all(callable(getattr(requests, name, None)) for name in
+                       ("ServerRequest", "_register", "_unanswerable", "_emit_cancel")) or not all(
+                       hasattr(requests, name) for name in ("_lock", "_open")):
+                raise ValueError("Unsupported gateway")
+            if requests._unanswerable("clarify", self.sid):
+                self.responses.put(None)
+                return
+            # Desktop answers batches through clarify.lock. send_async neither
+            # installs qids nor observes the event set by the final answer lock.
+            self.batch_request = requests.ServerRequest(self.sid, "clarify", params,
+                qids=[q["qid"] for q in params["questions"]])
+            requests._register(self.batch_request)
+        else:
+            self.settle = self.requests.send_async("clarify", self.sid, params, self.responses.put)
 
     def cancelled(self):
-        return not self.responses.empty()
+        return not self.responses.empty() or (self.batch_request is not None and self.batch_request.event.is_set())
 
     def close(self):
+        if self.batch_request is not None:
+            req, self.batch_request = self.batch_request, None
+            with self.requests._lock:
+                still_open = self.requests._open.get(req.id) is req
+                # Native settlement removes the request under this lock before
+                # setting its event. Preserve an answer racing a panel refresh.
+                if not still_open or req.event.is_set():
+                    self.responses.put(req.result)
+                if still_open:
+                    self.requests._open.pop(req.id)
+            if still_open:
+                self.requests._emit_cancel(req, "resolved")
         if self.settle:
             self.settle("resolved")
             self.settle = None

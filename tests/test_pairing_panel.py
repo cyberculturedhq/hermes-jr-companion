@@ -2,12 +2,14 @@ import json
 import os
 from pathlib import Path
 import re
+import sys
 import tempfile
 import threading
 import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+from pydantic import BaseModel, ConfigDict
 
 from hermes_jr.state import State
 from hermes_jr import pairing_panel as panel, setup_jobs as jobs
@@ -201,6 +203,88 @@ class PairingPanelTests(unittest.TestCase):
 
 
 class NativeSurfaceTests(unittest.TestCase):
+    def test_gateway_selects_loaded_clarification_contract_before_sending(self):
+        class Question(BaseModel):
+            qid: str
+            question: str
+            choices: list[str]
+
+        class OldParams(BaseModel):
+            model_config = ConfigDict(extra='forbid')
+            session_id: str
+            question: str | None = None
+            choices: list[str] | None = None
+            questions: list[Question] | None = None
+
+        class NewParams(BaseModel):
+            model_config = ConfigDict(extra='forbid')
+            session_id: str
+            questions: list[Question]
+
+        for schema in (OldParams, NewParams):
+            with self.subTest(schema=schema.__name__):
+                shown, withdrawn, callbacks, pending = [], [], [], {}
+                def send(method, sid, params, callback):
+                    schema.model_validate({'session_id': sid, **params})
+                    shown.append(params)
+                    callbacks.append(callback)
+                    return withdrawn.append
+                def request(sid, method, params, *, qids):
+                    return SimpleNamespace(id=str(len(shown)), sid=sid, params=params,
+                        qids=qids, event=threading.Event(), result=None)
+                def register(req):
+                    schema.model_validate({'session_id': req.sid, **req.params})
+                    pending[req.id] = req
+                    shown.append(req.params)
+                requests = SimpleNamespace(send_async=send, ServerRequest=request, _register=register,
+                    _open=pending, _lock=threading.Lock(), _unanswerable=lambda *args: False,
+                    _emit_cancel=lambda req, reason: withdrawn.append(reason))
+                registry = SimpleNamespace(SERVER_REQUESTS={'clarify': SimpleNamespace(params=schema)})
+                with patch.dict(sys.modules, {'tui_gateway.contracts.registry': registry}):
+                    surface = GatewayPanel(requests, 'owner')
+                    surface.show('Waiting')
+                    surface.show('Compare the code')
+                question = {'question': 'Compare the code', 'choices': ['Cancel pairing']}
+                expected = {'questions': [{'qid': 'q1', **question}]} if schema is NewParams else question
+                self.assertEqual(shown[-1], expected)
+                self.assertEqual(withdrawn, ['resolved'])
+                answer = {'answers': {'q1': 'Cancel pairing'}} if schema is NewParams else {'answer': 'Cancel pairing'}
+                if schema is NewParams:
+                    req = surface.batch_request
+                    self.assertEqual(req.qids, ['q1'])
+                    self.assertFalse(surface.cancelled())
+                    pending.pop(req.id)
+                    req.result = answer
+                    req.event.set()  # Native clarify.lock settles without an async callback.
+                else:
+                    callbacks[-1](answer)
+                self.assertTrue(surface.cancelled())
+                if schema is NewParams:
+                    req.event.clear()  # Settlement can remove the request before event.set().
+                with patch.dict(sys.modules, {'tui_gateway.contracts.registry': registry}):
+                    surface.show('A refresh after cancellation')
+                self.assertTrue(surface.cancelled())
+                self.assertEqual(len(shown), 2)
+                pending['unrelated'] = object()
+                surface.close()
+                self.assertEqual(withdrawn, ['resolved'] if schema is NewParams else ['resolved', 'resolved'])
+                self.assertEqual(set(pending), {'unrelated'})
+
+    def test_questions_only_gateway_without_native_batch_lifecycle_fails_closed(self):
+        registry = SimpleNamespace(SERVER_REQUESTS={'clarify': SimpleNamespace(
+            params=SimpleNamespace(model_fields={'questions': None}))})
+        requests = SimpleNamespace(send_async=lambda *args: self.fail('Sent an unanswerable batch'))
+        with patch.dict(sys.modules, {'tui_gateway.contracts.registry': registry}):
+            with self.assertRaisesRegex(ValueError, 'Unsupported gateway'):
+                GatewayPanel(requests, 'owner').show('Code')
+
+    def test_gateway_without_loaded_registry_keeps_single_question_transport(self):
+        shown = []
+        requests = SimpleNamespace(send_async=lambda method, sid, params, callback: shown.append(params))
+        with patch.dict(sys.modules, {'tui_gateway.contracts.registry': None}):
+            GatewayPanel(requests, 'owner').show('Code')
+        self.assertEqual(shown, [{'question': 'Code', 'choices': ['Cancel pairing']}])
+
     def test_wrong_cli_conversation_is_rejected(self):
         context = SimpleNamespace(_manager=SimpleNamespace(_cli_ref=SimpleNamespace(agent=SimpleNamespace(session_id='owner'))))
         with self.assertRaises(ValueError): resolve(context, 'other')
@@ -250,6 +334,36 @@ class NativeSurfaceTests(unittest.TestCase):
         cli._clarify_state = other
         surface.close()
         self.assertIs(cli._clarify_state, other)
+
+    def test_classic_questions_only_callback_gets_refreshed_batch_state(self):
+        activated = []
+        cli = SimpleNamespace(_app=SimpleNamespace(loop=SimpleNamespace(call_soon_threadsafe=lambda fn: fn())),
+            _clarify_state=None, _paint_now=lambda: None, _ring_bell=lambda **kwargs: None,
+            _clarify_callback=lambda questions: None,
+            _clarify_batch_set_active=lambda state, index: activated.append((state, index)))
+        cli._clarify_teardown = lambda: setattr(cli, '_clarify_state', None)
+        surface = ClassicPanel(cli)
+        surface.show('Waiting')
+        surface.show('Compare the code')
+        state = cli._clarify_state
+        self.assertEqual(state['questions'], [{'qid': 'q1', 'question': 'Compare the code',
+            'choices': ['Cancel pairing'], 'multi_select': False}])
+        self.assertEqual(state['answers'], {})
+        self.assertEqual(state['answer_meta'], {})
+        self.assertEqual(activated, [(state, 0)])
+        state['response_queue'].put({'q1': 'Cancel pairing'})
+        self.assertTrue(surface.cancelled())
+        surface.close()
+        self.assertIsNone(cli._clarify_state)
+
+    def test_classic_callback_supporting_both_shapes_keeps_flat_state(self):
+        cli = SimpleNamespace(_app=SimpleNamespace(loop=SimpleNamespace(call_soon_threadsafe=lambda fn: fn())),
+            _clarify_state=None, _paint_now=lambda: None, _ring_bell=lambda **kwargs: None,
+            _clarify_callback=lambda question, choices, multi_select=False, questions=None: None,
+            _clarify_teardown=lambda: None)
+        ClassicPanel(cli).show('Code')
+        self.assertEqual(cli._clarify_state['question'], 'Code')
+        self.assertNotIn('questions', cli._clarify_state)
 
     def test_gateway_replaces_pending_question_and_withdraws_matching_request(self):
         shown, withdrawn, callbacks = [], [], []
