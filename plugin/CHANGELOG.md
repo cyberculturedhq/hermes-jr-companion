@@ -1,3 +1,13 @@
+## 0.17.2
+
+- Restore native pairing panels on current Hermes CLI and Desktop while preserving older Hermes support.
+- Submit Desktop pairing cancellation through native question locks; preserve cancellation during panel refresh and dismiss only the pairing request.
+- Keep pairing confirmation on the iPhone and reject late answers after completion or cancellation.
+- Isolate installer interpreter discovery and subprocess imports from inherited Python paths.
+- Bind workspace dependencies to Hermes PM’s owning checkout and prefer its durable launcher over stale console scripts.
+
+Existing pairings and profile choices are preserved. Update the companion when Hermes work is idle, then restart loaded Hermes processes to use the new pairing hooks. No iOS update or relay deployment is required.
+
 ## 0.17.1
 
 - Use Hermes' durable command for native plugin operations and read the selected Python environment without importing the interactive CLI.

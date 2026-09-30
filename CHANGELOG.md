@@ -1,9 +1,12 @@
-## Installer bootstrap (main)
+## 0.17.2
 
-- Isolate interpreter discovery, installer startup, and Python subprocess imports from inherited Python paths.
-- Bind selected workspace dependencies to the owning checkout recorded by Hermes PM, so each command reads the current environment after profile publication.
-- Prefer that checkout's durable Hermes launcher when an older environment's console scripts are first on inherited PATH.
-- Keep the companion package at 0.17.1; this fix is delivered by downloading the current `install.py` and does not require a Hermes Agent update or messaging gateway restart.
+- Restore native pairing panels on current Hermes CLI and Desktop while preserving older Hermes support.
+- Submit Desktop pairing cancellation through native question locks; preserve cancellation during panel refresh and dismiss only the pairing request.
+- Keep pairing confirmation on the iPhone and reject late answers after completion or cancellation.
+- Isolate installer interpreter discovery and subprocess imports from inherited Python paths.
+- Bind workspace dependencies to Hermes PM’s owning checkout and prefer its durable launcher over stale console scripts.
+
+Existing pairings and profile choices are preserved. Update the companion when Hermes work is idle, then restart loaded Hermes processes to use the new pairing hooks. No iOS update or relay deployment is required.
 
 ## 0.17.1
 
