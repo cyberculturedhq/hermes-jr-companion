@@ -138,7 +138,7 @@ async def desktop():
     with server._sessions_lock:
         server._sessions[sid] = {'session_key': durable}
     bind_request_sinks(server_requests, frames.append, lambda *event: events.append(event))
-    for number, cancel in [(3, False), (4, True)]:
+    for number, cancel in [(3, False), (4, True), (5, 'skip')]:
         frames.clear()
         identity = job(number)
         pending = asyncio.create_task(asyncio.to_thread(command, identity, durable))
@@ -154,7 +154,15 @@ async def desktop():
         assert '1234 5678 9012' in question['question']
         assert question['choices'] == ['Cancel pairing']
         answer = {'answers': {question['qid']: 'Cancel pairing'}} if questions else {'answer': 'Cancel pairing'}
-        if cancel:
+        if cancel == 'skip':
+            assert server_requests.resolve_response({'id': frame['id'], 'result': {}})
+        elif cancel and questions:
+            # Current Desktop submits the selected choice through clarify.lock,
+            # not a JSON-RPC response to the server request.
+            response = server._methods['clarify.lock']('fixture-lock', {
+                'request_id': frame['id'], 'question_id': question['qid'], 'answer': 'Cancel pairing'})
+            assert response['result'] == {'status': 'ok', 'remaining': []}, response
+        elif cancel:
             assert server_requests.resolve_response({'id': frame['id'], 'result': answer})
         else:
             setup_jobs.publish(state, identity, 'connected')

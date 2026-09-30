@@ -223,15 +223,25 @@ class NativeSurfaceTests(unittest.TestCase):
 
         for schema in (OldParams, NewParams):
             with self.subTest(schema=schema.__name__):
-                shown, withdrawn, callbacks = [], [], []
+                shown, withdrawn, callbacks, pending = [], [], [], {}
                 def send(method, sid, params, callback):
                     schema.model_validate({'session_id': sid, **params})
                     shown.append(params)
                     callbacks.append(callback)
                     return withdrawn.append
+                def request(sid, method, params, *, qids):
+                    return SimpleNamespace(id=str(len(shown)), sid=sid, params=params,
+                        qids=qids, event=threading.Event(), result=None)
+                def register(req):
+                    schema.model_validate({'session_id': req.sid, **req.params})
+                    pending[req.id] = req
+                    shown.append(req.params)
+                requests = SimpleNamespace(send_async=send, ServerRequest=request, _register=register,
+                    _open=pending, _lock=threading.Lock(), _unanswerable=lambda *args: False,
+                    _emit_cancel=lambda req, reason: withdrawn.append(reason))
                 registry = SimpleNamespace(SERVER_REQUESTS={'clarify': SimpleNamespace(params=schema)})
                 with patch.dict(sys.modules, {'tui_gateway.contracts.registry': registry}):
-                    surface = GatewayPanel(SimpleNamespace(send_async=send), 'owner')
+                    surface = GatewayPanel(requests, 'owner')
                     surface.show('Waiting')
                     surface.show('Compare the code')
                 question = {'question': 'Compare the code', 'choices': ['Cancel pairing']}
@@ -239,10 +249,34 @@ class NativeSurfaceTests(unittest.TestCase):
                 self.assertEqual(shown[-1], expected)
                 self.assertEqual(withdrawn, ['resolved'])
                 answer = {'answers': {'q1': 'Cancel pairing'}} if schema is NewParams else {'answer': 'Cancel pairing'}
-                callbacks[-1](answer)
+                if schema is NewParams:
+                    req = surface.batch_request
+                    self.assertEqual(req.qids, ['q1'])
+                    self.assertFalse(surface.cancelled())
+                    pending.pop(req.id)
+                    req.result = answer
+                    req.event.set()  # Native clarify.lock settles without an async callback.
+                else:
+                    callbacks[-1](answer)
                 self.assertTrue(surface.cancelled())
+                if schema is NewParams:
+                    req.event.clear()  # Settlement can remove the request before event.set().
+                with patch.dict(sys.modules, {'tui_gateway.contracts.registry': registry}):
+                    surface.show('A refresh after cancellation')
+                self.assertTrue(surface.cancelled())
+                self.assertEqual(len(shown), 2)
+                pending['unrelated'] = object()
                 surface.close()
-                self.assertEqual(withdrawn, ['resolved', 'resolved'])
+                self.assertEqual(withdrawn, ['resolved'] if schema is NewParams else ['resolved', 'resolved'])
+                self.assertEqual(set(pending), {'unrelated'})
+
+    def test_questions_only_gateway_without_native_batch_lifecycle_fails_closed(self):
+        registry = SimpleNamespace(SERVER_REQUESTS={'clarify': SimpleNamespace(
+            params=SimpleNamespace(model_fields={'questions': None}))})
+        requests = SimpleNamespace(send_async=lambda *args: self.fail('Sent an unanswerable batch'))
+        with patch.dict(sys.modules, {'tui_gateway.contracts.registry': registry}):
+            with self.assertRaisesRegex(ValueError, 'Unsupported gateway'):
+                GatewayPanel(requests, 'owner').show('Code')
 
     def test_gateway_without_loaded_registry_keeps_single_question_transport(self):
         shown = []

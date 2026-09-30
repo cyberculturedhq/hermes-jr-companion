@@ -102,20 +102,50 @@ class GatewayPanel:
         self.requests, self.sid = requests, sid
         self.responses = queue.Queue()
         self.settle = None
+        self.batch_request = None
         if callable(getattr(requests, "open_requests", None)) and requests.open_requests(sid):
             raise ValueError("Another question is already open")
 
     def show(self, text):
         self.close()
+        if self.cancelled():
+            return
         if callable(getattr(self.requests, "open_requests", None)) and self.requests.open_requests(self.sid):
             raise ValueError("Another question is already open")
-        self.settle = self.requests.send_async("clarify", self.sid,
-            clarification_params(text, ["Cancel pairing"]), self.responses.put)
+        params = clarification_params(text, ["Cancel pairing"])
+        if "questions" in params:
+            requests = self.requests
+            if not all(callable(getattr(requests, name, None)) for name in
+                       ("ServerRequest", "_register", "_unanswerable", "_emit_cancel")) or not all(
+                       hasattr(requests, name) for name in ("_lock", "_open")):
+                raise ValueError("Unsupported gateway")
+            if requests._unanswerable("clarify", self.sid):
+                self.responses.put(None)
+                return
+            # Desktop answers batches through clarify.lock. send_async neither
+            # installs qids nor observes the event set by the final answer lock.
+            self.batch_request = requests.ServerRequest(self.sid, "clarify", params,
+                qids=[q["qid"] for q in params["questions"]])
+            requests._register(self.batch_request)
+        else:
+            self.settle = self.requests.send_async("clarify", self.sid, params, self.responses.put)
 
     def cancelled(self):
-        return not self.responses.empty()
+        return not self.responses.empty() or (self.batch_request is not None and self.batch_request.event.is_set())
 
     def close(self):
+        if self.batch_request is not None:
+            req, self.batch_request = self.batch_request, None
+            with self.requests._lock:
+                still_open = self.requests._open.get(req.id) is req
+                # Native settlement removes the request under this lock before
+                # setting its event. Preserve an answer racing a panel refresh.
+                if not still_open or req.event.is_set():
+                    self.responses.put(req.result)
+                if still_open:
+                    self.requests._open.pop(req.id)
+            if still_open:
+                self.requests._emit_cancel(req, "resolved")
         if self.settle:
             self.settle("resolved")
             self.settle = None
