@@ -79,6 +79,8 @@ jobs:
         run: python ../tools/compatibility/check.py --production-contracts
       - name: Check native pairing panels with real Hermes renderers
         run: python tools/compatibility/pairing_panel.py upstream --companion plugin
+      - name: Check phone approval handshake with real Hermes registry
+        run: python Validation/approval_runtime.py upstream --companion plugin
       - name: Check upstream strict internal contracts
         id: strict_contracts
         continue-on-error: true

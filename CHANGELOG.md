@@ -1,3 +1,11 @@
+## 0.17.3
+
+- Register phone approval support with Hermes before attaching a conversation or submitting a prompt, and register again after a backend reconnect.
+- Preserve approval notifications on older Hermes versions. Decline unsupported server requests explicitly so Hermes does not wait for input the phone cannot provide.
+- Exercise the real Hermes approval registry in compatibility checks, including explicit allow/deny and reconnects.
+
+Existing installations missing this handshake must install this release once from an approval-capable Hermes client on the host computer or the signed bootstrap directly. Future updates can request approval on the phone. No iOS update or relay deployment is required.
+
 ## 0.17.2
 
 - Restore native pairing panels on current Hermes CLI and Desktop while preserving older Hermes support.

@@ -33,8 +33,13 @@ incompatible mobile protocol may still require another app update.
   mobile events. Modern answers use `request.answer` or `clarify.lock`; approval
   acknowledgments retain the native approval ID. Pending requests replay after
   binding the resumed session. Cancellation invalidates the mobile card.
-- Secret/sudo or unknown input requests direct the user to the Hermes dashboard.
-  The adapter never invents an answer or grants approval automatically.
+- The bridge registers `client.capabilities {server_requests: true}` on each
+  backend connection before forwarding mobile session or prompt requests. Only
+  an explicit method-not-found permits older notification-based Hermes support;
+  other handshake failures close the connection before forwarding the request.
+- Secret/sudo or unknown input requests receive a method-not-found error and a
+  phone notice to continue in Hermes on the computer. This includes replayed
+  requests. The adapter never supplies input or grants approval automatically.
 - A backend disconnect invalidates the phone connection. No uncertain write,
   prompt, or answer is retried automatically. Check history before repeating it.
 - Direct dashboard connections and old companions retain legacy behavior and
@@ -59,6 +64,13 @@ completion, session creation/status and command catalogs. Typed upstream
 contracts validate representative writes without executing them. Modern
 approval and clarification replies exercise Hermes's real request registry.
 Companion tests cover both interaction generations and invalid/stale answers.
+
+`Validation/approval_runtime.py upstream --companion plugin` separately runs the
+production companion socket against Hermes's real capability gate and approval
+registry over disposable loopback WebSockets. It reproduces refusal before
+registration, then checks explicit Allow once/Deny, reconnect registration, and
+unsupported-input cancellation. No commands or models run. Older revisions
+without the gate are covered by the existing legacy adapter checks.
 
 The mandatory runtime check uses Hermes's production result-schema policy (log internal drift), while still requiring the mobile response fields and validating request parameters. A second check enables Hermes's stricter test-only result policy and emits a visible workflow warning and summary if upstream's own schemas disagree with its handlers. This diagnostic does not block a release when the real mobile API passes; no isolation, network guard, or mobile assertion is disabled.
 

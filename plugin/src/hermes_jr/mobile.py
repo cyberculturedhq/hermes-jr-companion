@@ -10,6 +10,7 @@ import json
 import time
 
 PREFIX = 'jr.v1.'
+SERVER_REQUESTS = frozenset({'approval', 'clarify'})
 SCOPED = {'profile', 'session_id'}
 PARAMS = {
     'gateway.ping': set(), 'profiles.list': {'include_sessions'},
@@ -42,7 +43,7 @@ FEATURES = {
 }
 # Change when adapter behavior or supported features change, independently of
 # package version, encrypted transport version, and Hermes's desktop contract.
-ADAPTER_REVISION = 1
+ADAPTER_REVISION = 2
 REVISION = hashlib.sha256(json.dumps({
     'protocol': 1, 'adapter': ADAPTER_REVISION, 'features': FEATURES,
     'params': {k: sorted(v) for k, v in PARAMS.items()},
@@ -69,6 +70,16 @@ def event(kind, sid, payload):
 
 def reply(rid, result):
     return {'jsonrpc': '2.0', 'id': rid, 'result': result}
+
+
+def unsupported_requests(frame):
+    """Requests to decline locally, without exposing their input fields to the phone."""
+    requests = [frame]
+    result = frame.get('result')
+    if isinstance(result, dict) and isinstance(result.get('open_requests'), list):
+        requests.extend(result['open_requests'])
+    return [request for request in requests if isinstance(request, dict)
+            and 'id' in request and 'method' in request and request['method'] not in SERVER_REQUESTS]
 
 
 class MobileAdapter:
@@ -134,13 +145,12 @@ class MobileAdapter:
         """Translate response/event/server request without executing any action."""
         if not isinstance(frame, dict):
             raise ValueError('Invalid Hermes frame')
-        if frame.get('method') in {'approval', 'clarify', 'sudo', 'secret'} and 'id' in frame:
+        if frame.get('method') in SERVER_REQUESTS and 'id' in frame:
             return self.interaction(frame)
         if 'method' in frame and 'id' in frame:
-            # Unknown blocking interactions must be visible; never approve or
-            # silently answer them. The backend remains authoritative.
+            # The transport rejects unsupported requests, never approving them.
             sid = (frame.get('params') or {}).get('session_id')
-            return event('status.update', sid, {'text': 'Hermes needs input in its dashboard. Open the dashboard to respond.'})
+            return event('status.update', sid, {'text': 'Hermes needs input the phone cannot provide. Continue this conversation in Hermes on your computer.'})
         if frame.get('method') == 'event':
             params = frame.get('params', {})
             if params.get('type') == 'request.cancel':
@@ -180,7 +190,7 @@ class MobileAdapter:
     def interaction(self, frame):
         params = frame.get('params', {})
         sid, rid, method = params.get('session_id'), frame.get('id'), frame.get('method')
-        if not isinstance(sid, str) or not isinstance(rid, str) or method not in {'approval', 'clarify', 'sudo', 'secret'}:
+        if not isinstance(sid, str) or not isinstance(rid, str) or method not in SERVER_REQUESTS:
             raise ValueError('Unsupported Hermes interaction')
         public_id = 'jr-request:' + rid
         if public_id not in self.interactions and len(self.interactions) >= 256:
