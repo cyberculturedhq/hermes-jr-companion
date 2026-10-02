@@ -1,3 +1,12 @@
+## 0.18.0
+
+- Send iPhone replies to the existing Bot Chat owner through Hermes' durable mailbox. Busy owners receive the message after their current turn.
+- Keep replies in the same canonical conversation across compression. Preserve human authorship and the existing writer.
+- Bind each reply ID to its device, message and original owner. A lost acknowledgement reads the receipt and never submits another prompt.
+- Admit only complete attachments uploaded by the same device. Cancel queued replies without interrupting another Hermes process.
+
+This release needs the matching iPhone app. Live replies require a Hermes version with the Bot Chat mailbox. Older Hermes versions report the feature as unavailable. Update the companion, then restart loaded Hermes processes when idle. Existing pairings and profile settings are preserved. No relay deployment is required.
+
 ## 0.17.3
 
 - Register phone approval support with Hermes before attaching a conversation or submitting a prompt, and register again after a backend reconnect.

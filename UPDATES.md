@@ -16,6 +16,12 @@ hermes jr update --checks off
 hermes jr update --checks on
 ```
 
+## Bot Chat replies
+
+Companion 0.18.0 and the matching iPhone app send replies to the process that already controls the profile's Bot Chat. If the bot is busy, Hermes queues the reply until its current turn ends. The app does not move the conversation or create another session. If no process controls the Bot Chat, the phone continues that same stored conversation through its normal Hermes connection.
+
+This feature requires Hermes' live Bot Chat mailbox. An older Hermes version, or an owner that cannot receive mailbox messages, requires a Hermes update before the phone can send. Restart loaded Hermes processes when idle after the companion update. A reply that already started must be stopped in its controlling Hermes window. Phone attachments use complete, device-owned file uploads. Command approval still requires an available approval interface on the controlling Hermes process.
+
 ## Install an update
 
 Ask Hermes:

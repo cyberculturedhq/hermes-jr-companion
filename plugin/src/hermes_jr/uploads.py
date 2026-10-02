@@ -42,4 +42,6 @@ def upload(state, device_id, body):
             raise ValueError("Upload offset mismatch")
         output.write(data)
     complete = offset + len(data) == total
+    if complete:
+        state.set('upload-complete/' + owner + '/' + upload_id + '/' + filename, {'size': total})
     return {"offset": offset + len(data), "complete": complete, "path": str(target) if complete else None}
