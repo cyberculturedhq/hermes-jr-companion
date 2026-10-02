@@ -7,6 +7,7 @@ struct BotProfile: Identifiable, Hashable, Codable, Sendable {
     var model: String
     var isGatewayRunning: Bool
     var avatarDataURL: String? = nil
+    var botSession: HermesSession? = nil
 
     var name: String { displayName.isEmpty ? (id == "default" ? "Hermes" : id.capitalized) : displayName }
 }
@@ -43,11 +44,12 @@ struct ChatMessage: Identifiable, Hashable, Codable, Sendable {
 
 enum HermesSendError: LocalizedError {
     case notSubmitted(String)
+    case turnFailed(String)
     case outcomeUnknown(String)
 
     var errorDescription: String? {
         switch self {
-        case .notSubmitted(let message), .outcomeUnknown(let message): message
+        case .notSubmitted(let message), .turnFailed(let message), .outcomeUnknown(let message): message
         }
     }
 }
@@ -70,6 +72,12 @@ enum ConnectionPhase: Equatable {
 enum HermesError: LocalizedError {
     case message(String)
     var errorDescription: String? { if case let .message(text) = self { text } else { "Connection failed." } }
+}
+
+struct HermesHTTPError: LocalizedError {
+    let statusCode: Int
+    let message: String
+    var errorDescription: String? { message }
 }
 
 struct HermesCommandSuggestion: Identifiable, Hashable, Sendable {

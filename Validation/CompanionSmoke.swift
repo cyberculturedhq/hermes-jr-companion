@@ -21,7 +21,7 @@ struct CompanionSmoke {
         let sessions = try await client.sessions(profile: "research")
         precondition(sessions.count == 101)
         let history = try await client.messages(profile: "research", sessionID: "saved-0")
-        precondition(history.count == 501 && history.last?.text == "Message 500")
+        precondition(history.count == 10 && history.last?.text == "Message 500")
         print("PASS: encrypted REST discovery, pagination, history, and companion capabilities")
         try await client.openSession(profile: "research", sessionID: "saved-0")
         var text = ""

@@ -78,6 +78,9 @@ struct SessionListView: View {
             }
         }
         .toolbar {
+            if #available(iOS 26.0, *) {
+                DefaultToolbarItem(kind: .search, placement: .bottomBar)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 if store.sessionRefresh.phase == .failed || store.sessionRefresh.phase == .unavailable {
                     Button("Retry", systemImage: "arrow.clockwise") { Task { await store.refreshSessions() } }

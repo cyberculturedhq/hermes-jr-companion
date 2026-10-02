@@ -2,6 +2,7 @@ import SwiftUI
 
 enum AppRoute: Hashable {
     case profile(String)
+    case bot(String)
     case session(String)
 }
 
@@ -31,36 +32,14 @@ struct AppRootView: View {
             } else {
                 switch store.canBrowseCachedContent && store.phase == .disconnected ? .restoring : store.phase {
                 case .restoring, .connected:
-                    NavigationStack(path: $path) {
-                        BotListView()
-                            .navigationDestination(for: AppRoute.self) { route in
-                                switch route {
-                                case .profile(let id):
-                                    if let profile = store.profiles.first(where: { $0.id == id }) {
-                                        SessionListView(profile: profile)
-                                            .onAppear {
-                                                if store.selectedProfile?.id != id {
-                                                    // Loading all pages continues when a conversation is pushed.
-                                                    Task { await store.selectProfile(profile) }
-                                                }
-                                            }
-                                    } else {
-                                        ContentUnavailableView("Profile Unavailable", systemImage: "person.crop.circle.badge.questionmark")
-                                    }
-                                case .session(let id):
-                                    ChatView(sessionID: id)
-                                        .id(id)
-                                        .onAppear {
-                                            if store.selectedSession?.id != id || !store.sessionReady,
-                                               let session = store.sessions.first(where: { $0.id == id }) {
-                                                Task { await store.openSession(session) }
-                                            }
-                                        }
-                                }
-                            }
-                    }
+                    BotListView(path: $path)
                     .overlay {
-                        if path.isEmpty, PushNotifications.shared.pendingReference != nil,
+                        if store.startingCompanionUpdate, store.updateDestination == nil {
+                            ProgressView("Opening update conversation…")
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(Color(.systemBackground))
+                                .accessibilityIdentifier("companion.update-opening")
+                        } else if path.isEmpty, PushNotifications.shared.pendingReference != nil,
                            store.phase == .restoring || store.openingNotificationReference != nil {
                             ProgressView("Opening conversation…")
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -100,7 +79,9 @@ struct AppRootView: View {
         .onChange(of: path) { old, new in
             if case .session(let id) = new.last {
                 store.visibleSessionID = id
-                if let profile = store.selectedProfile { store.markSessionRead(id, profile: profile.id) }
+            }
+            else if case .bot(let profileID) = new.last, store.selectedProfile?.id == profileID {
+                store.visibleSessionID = store.selectedSession?.id
             }
             else { store.visibleSessionID = nil }
             guard new.count < old.count else { return }
@@ -121,6 +102,8 @@ struct AppRootView: View {
                 case .session(let previousID) where previousID != id:
                     // /new replaces the conversation while keeping Back pointed at its profile.
                     path[path.count - 1] = .session(id)
+                case .bot(let profileID) where store.selectedProfile?.id == profileID:
+                    store.visibleSessionID = id
                 default:
                     break
                 }
@@ -168,9 +151,50 @@ struct AppRootView: View {
         .onChange(of: store.isLoadingMessages) { _, busy in
             if !busy { Task { await store.processPendingNotification() } }
         }
+        .onChange(of: store.openingBotProfileID) { _, id in
+            if id == nil { Task { await store.processPendingNotification() } }
+        }
         .onChange(of: store.selectedSession?.id) { _, _ in store.setAppActive(scenePhase == .active) }
         .onReceive(NotificationCenter.default.publisher(for: .hermesNotificationOpened)) { notification in
             if let reference = notification.object as? String { Task { await store.openNotification(reference: reference) } }
+        }
+    }
+}
+
+struct HomeRouteDestination: View {
+    @Environment(AppStore.self) private var store
+    let route: AppRoute
+
+    var body: some View {
+        switch route {
+        case .profile(let id):
+            if let profile = store.profiles.first(where: { $0.id == id }) {
+                SessionListView(profile: profile)
+                    .onAppear {
+                        if store.selectedProfile?.id != id {
+                            // Loading all pages continues when a conversation is pushed.
+                            Task { await store.selectProfile(profile) }
+                        }
+                    }
+            } else {
+                ContentUnavailableView("Profile Unavailable", systemImage: "person.crop.circle.badge.questionmark")
+            }
+        case .bot(let id):
+            if let profile = store.profiles.first(where: { $0.id == id }) {
+                ChatView(botProfile: profile)
+                    .id("bot.\(id)")
+            } else {
+                ContentUnavailableView("Profile Unavailable", systemImage: "person.crop.circle.badge.questionmark")
+            }
+        case .session(let id):
+            ChatView(sessionID: id)
+                .id(id)
+                .onAppear {
+                    if store.selectedSession?.id != id || !store.sessionReady,
+                       let session = store.sessions.first(where: { $0.id == id }) {
+                        Task { await store.openSession(session) }
+                    }
+                }
         }
     }
 }

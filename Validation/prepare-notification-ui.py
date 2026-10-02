@@ -34,9 +34,11 @@ for path in (repo / "Hermes").iterdir():
             shutil.copytree(path, root / "Hermes" / path.name)
         else:
             (root / "Hermes" / path.name).symlink_to(path)
-shutil.copy2(repo / ("Validation/GuidedUpdateFixture.swift" if "--guided-update" in sys.argv else "Validation/NotificationNavigationFixture.swift"), root / "Hermes/HermesApp.swift")
+fixture = "Validation/BotHomeFixture.swift" if "--bot-home" in sys.argv else "Validation/GuidedUpdateFixture.swift" if "--guided-update" in sys.argv else "Validation/NotificationNavigationFixture.swift"
+shutil.copy2(repo / fixture, root / "Hermes/HermesApp.swift")
 for name in ["HermesNotificationService", "SharedNotifications"]:
     (root / name).symlink_to(repo / name, target_is_directory=True)
 (root / "HermesUITests").mkdir()
-shutil.copy2(repo / ("Validation/GuidedUpdateUI.swift" if "--guided-update" in sys.argv else "Validation/NotificationNavigationUI.swift"), root / "HermesUITests")
+ui_tests = "Validation/BotHomeUI.swift" if "--bot-home" in sys.argv else "Validation/GuidedUpdateUI.swift" if "--guided-update" in sys.argv else "Validation/NotificationNavigationUI.swift"
+shutil.copy2(repo / ui_tests, root / "HermesUITests")
 print(project)

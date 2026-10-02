@@ -7,6 +7,23 @@ TOKEN = 'fixture-dashboard-token'
 profiles = [dict(name='default', path='/fixture/hermes', display_name='Hermes', description='General', model='test-model', gateway_running=False), dict(name='research', path='/fixture/hermes/profiles/research', display_name='Research', description='Research profile', model='research-model', gateway_running=True)]
 rpc_requests = []
 launch_home = '/fixture/hermes'
+bot_mode = 'available'
+bot_lookup_delay = 0
+bot_message_delay = 0
+bot_preview = 'Existing continuous bot conversation'
+bot_delivery_mode = 'owner'
+bot_replies = {}
+
+async def fixture_bot(request):
+    global bot_mode, bot_lookup_delay, bot_message_delay, bot_preview, bot_delivery_mode
+    body = await request.json()
+    bot_mode = body.get('mode', 'available')
+    bot_lookup_delay = body.get('lookup_delay', 0)
+    bot_message_delay = body.get('message_delay', 0)
+    bot_preview = body.get('preview', 'Existing continuous bot conversation')
+    bot_delivery_mode = body.get('delivery_mode', 'owner')
+    bot_replies.clear()
+    return web.json_response({'ok': True})
 
 async def fixture_stats(request):
     return web.json_response({'requests': rpc_requests})
@@ -41,10 +58,34 @@ async def sessions(request):
     return web.json_response({'sessions':rows,'total':101})
 
 async def messages(request):
-    if request.query.get('profile') != 'research' or request.match_info['sid'] != 'saved-0':
+    sid=request.match_info['sid']
+    if request.query.get('profile') != 'research' or sid not in ('saved-0', 'saved-short', 'saved-exact', 'saved-sparse', 'saved-trailing', 'bot-tip', 'bot-next-tip'):
         return web.json_response({'error':'wrong stored identity'}, status=400)
     offset=int(request.query.get('offset','0'))
-    rows=[dict(id=n,role='user' if n%2==0 else 'assistant',content=f'Message {n}') for n in range(offset,min(offset+500,501))]
+    limit=int(request.query.get('limit','500'))
+    newest=request.query.get('order')=='latest'
+    if sid in ('bot-tip', 'bot-next-tip'):
+        await asyncio.sleep(bot_message_delay)
+        rows = [dict(id='bot-message', role='assistant', content=bot_preview)]
+        for rid, reply in bot_replies.items():
+            if reply['status'] == 'settled' and reply['session_id'] == sid:
+                rows += [dict(id=rid+'-user', role='user', content=reply['text']),
+                         dict(id=rid+'-assistant', role='assistant', content=reply['reply'])]
+    elif sid=='saved-short':
+        indices=list(range(11,-1,-1) if newest else range(12))[offset:offset+limit]
+        rows=[dict(id=n,role='user' if n==0 else 'assistant' if n==11 else 'tool',content=f'Message {n}') for n in sorted(indices)]
+    elif sid=='saved-sparse':
+        indices=list(range(1201,-1,-1) if newest else range(1202))[offset:offset+limit]
+        rows=[dict(id=n,role='user' if n==0 else 'assistant' if n==1 else 'tool',content=f'Message {n}') for n in sorted(indices)]
+    elif sid=='saved-trailing':
+        indices=list(range(41,-1,-1) if newest else range(42))[offset:offset+limit]
+        rows=[dict(id=n,role='user' if n==40 else 'assistant' if n==41 else 'tool',content=f'Message {n}') for n in sorted(indices)]
+    elif sid=='saved-exact':
+        indices=list(range(9,-1,-1) if newest else range(10))[offset:offset+limit]
+        rows=[dict(id=n,role='user' if n%2==0 else 'assistant',content=f'Message {n}') for n in sorted(indices)]
+    else:
+        indices=list(range(500,-1,-1) if newest else range(501))[offset:offset+limit]
+        rows=[dict(id=n,role='user' if n%2==0 else 'assistant',content=f'Message {n}') for n in sorted(indices)]
     return web.json_response({'messages':rows,'pagination':{'returned':len(rows)}})
 
 async def ticket(request):
@@ -52,7 +93,36 @@ async def ticket(request):
 
 uploaded_files = {}
 async def upload_capabilities(request):
-    return web.json_response({'file_upload': 1})
+    result = {'file_upload': 1}
+    if bot_delivery_mode != 'missing_capabilities': result['bot_replies'] = 1
+    return web.json_response(result)
+
+async def enroll(request):
+    return web.json_response({'device_id': '11111111-1111-4111-8111-111111111111', 'device_token': 'fixture-device-token', 'installation_id': 'fixture-installation'})
+
+async def bot_reply(request):
+    rid = request.match_info['rid']
+    if request.method == 'PUT':
+        body = await request.json()
+        rpc_requests.append({'method': 'bot.reply.put', 'params': {**body, 'id': rid}})
+        if body.get('profile') != 'research' or body.get('session_id') not in ('bot-tip', 'bot-next-tip'):
+            return web.json_response({'error': 'wrong bot'}, status=400)
+        paths = ['/fixture/uploads/' + ref['filename'] for ref in body.get('attachments', [])]
+        text = '\n'.join([body['text']] + ['[User attached file: ' + path + ']' for path in paths]).strip()
+        bot_replies.setdefault(rid, {'route': 'session' if bot_delivery_mode == 'session' else 'owner',
+            'status': 'queued', 'reply': 'Bot replied to ' + body['text'], 'session_id': body['session_id'],
+            'paths': paths, 'text': text, 'reads': 0, 'mode': bot_delivery_mode})
+        if bot_delivery_mode == 'lost_ack': return web.json_response({'error': 'lost acknowledgement'}, status=503)
+    if rid not in bot_replies: return web.json_response({'error': 'not found'}, status=404)
+    reply = bot_replies[rid]
+    if request.method == 'DELETE': rpc_requests.append({'method': 'bot.reply.cancel', 'params': {'id': rid}})
+    if request.method == 'DELETE' and reply['status'] == 'queued': reply['status'] = 'cancelled'
+    elif request.method == 'GET' and reply['status'] not in ('cancelled', 'settled'):
+        reply['reads'] += 1
+        if reply['mode'] == 'owner_failed': reply.update(status='failed', error='Fixture bot turn failed')
+        elif reply['mode'] == 'owner_lost': reply.update(status='ambiguous', error='Fixture bot owner lost')
+        elif reply['mode'] != 'queued_forever': reply['status'] = 'settled' if reply['reads'] >= 2 else 'claimed'
+    return web.json_response({k: v for k, v in reply.items() if k not in ('reads', 'mode')})
 
 async def upload_file(request):
     body = await request.json()
@@ -80,7 +150,25 @@ async def websocket(request):
         message=frame.json(); method=message['method']; params=message.get('params',{}); result={}; error=None; error_code=-32602
         rpc_requests.append({'method': method, 'params': params})
         if method=='gateway.ping': result={'ok':True}
-        elif method=='profiles.list': result={'profiles':profiles}
+        elif method=='client.capabilities':
+            if params != {'server_requests': True}: error='Invalid client capabilities'
+            else: result={'server_requests':['approval','clarify'], 'declines_not_shown':True}
+        elif method=='profiles.list':
+            if params.get('include_sessions') is True:
+                await asyncio.sleep(bot_lookup_delay)
+            if params.get('include_sessions') is True and bot_mode == 'failure':
+                error = 'Fixture bot lookup failed'
+            else:
+                rows = [dict(row) for row in profiles]
+                if params.get('include_sessions') is True and bot_mode != 'unsupported':
+                    for row in rows:
+                        row['canonical_session'] = None
+                        if row['name'] == 'research' and bot_mode != 'missing':
+                            row['canonical_session'] = dict(id='bot-root', resolved_id='bot-next-tip' if bot_mode == 'advanced' else 'bot-tip',
+                                root_title='Other Chat' if bot_mode == 'malformed' else 'Bot Chat', title='Compressed history',
+                                preview=bot_preview, last_active=1800000000, message_count=1)
+                        row['last_session'] = dict(id='saved-0', preview='Separate profile session message')
+                result={'profiles':rows}
         elif method=='config.get':
             if params != {'key': 'profile'}: error='Only the gateway profile identity may be read'
             else: result={'home': launch_home} if launch_home is not None else {}
@@ -92,7 +180,7 @@ async def websocket(request):
             elif method != 'complete.slash' and (command_profile not in ('research', 'default') or params.get('session_id') != 'runtime-'+command_profile):
                 error='Commands must use the selected profile and runtime session id'
             elif method=='commands.catalog':
-                builtin_pairs = [['/usage', 'Show current session token usage'], ['/reasoning', 'Set reasoning effort'], ['/status', 'Show session status'], ['/title', 'Name this session'], ['/model', 'Switch the model'], ['/new', 'Start a new session [name]'], ['/save', 'Save to a file [path]']]
+                builtin_pairs = [['/usage', 'Show current session token usage'], ['/reasoning', 'Set reasoning effort'], ['/status', 'Show session status'], ['/title', 'Name this session'], ['/model', 'Switch the model'], ['/new', 'Start a new session [name]'], ['/save', 'Save to a file [path]'], ['/compress', 'Compress this conversation']]
                 extension_pairs = [[name, 'Fixture command'] for name in ['/fixture-reject', '/fixture-server-error', '/fixture-disconnect', '/fixture-direct', '/fixture-empty-send', '/fixture-alias']]
                 result={
                     'pairs': builtin_pairs + extension_pairs + [['/fixture-skill', 'Run the research skill']],
@@ -158,10 +246,12 @@ async def websocket(request):
                 else: error='Must not dispatch rejected commands: '+str(name)
         elif method in ('session.create','session.resume'):
             profile = params.get('profile')
-            saved_id = 'saved-default' if profile=='default' else 'saved-0'
+            saved_id = params.get('session_id') if method == 'session.resume' and params.get('session_id') in ('bot-tip', 'bot-next-tip') else 'saved-default' if profile=='default' else 'saved-0'
             if profile not in ('research', 'default'): error='Wrong profile for session'
             elif method=='session.resume' and params.get('session_id')!=saved_id: error='Must resume stored id'
             else: result={'session_id':'runtime-'+profile,'stored_session_id':saved_id,'session_key':saved_id}
+        elif method=='session.compress':
+            result = {'info': {'stored_session_id': 'bot-next-tip'}, 'message': 'Bot context compressed'}
         elif method=='prompt.submit':
             if params.get('session_id')!='runtime-research': error='Must send runtime id'
             elif params.get('text')=='reject-submit': error='Fixture rejected the prompt'
@@ -246,6 +336,9 @@ for route, handler in [('api/health',health),('api/auth/me',me),('api/profiles',
     app.router.add_get('/hermes/'+route,handler)
 app.router.add_get('/hermes/api/plugins/hermes-jr/v1/capabilities',upload_capabilities)
 app.router.add_put('/hermes/api/plugins/hermes-jr/v1/uploads',upload_file)
+app.router.add_post('/hermes/api/plugins/hermes-jr/v1/enroll',enroll)
+app.router.add_route('*','/hermes/api/plugins/hermes-jr/v1/bot-replies/{rid}',bot_reply)
 app.router.add_post('/hermes/api/auth/ws-ticket',ticket)
 app.router.add_post('/hermes/api/fixture/identity',fixture_identity)
+app.router.add_post('/hermes/api/fixture/bot',fixture_bot)
 web.run_app(app,host='127.0.0.1',port=19119,print=lambda _: print('Fixture ready at 127.0.0.1:19119',flush=True),access_log=None)

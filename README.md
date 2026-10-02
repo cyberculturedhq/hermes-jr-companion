@@ -2,7 +2,7 @@
 
 A native SwiftUI companion for your existing [Nous Research Hermes Agent](https://github.com/NousResearch/hermes-agent) installation.
 
-Connect → choose a bot/profile → browse sessions → resume a conversation or start a new one. Conversations run inside Hermes with that profile’s existing model account, tools, skills, memory, and session history.
+Connect, then select **Profiles** or **Bots** on the home screen. **Profiles** opens a profile’s session list. You can resume a conversation or start a new session. **Bots** opens that profile’s existing **Bot Chat**, including its latest continuation after history compression. Create a missing Bot Chat in Hermes first. Bot Chat keeps its fixed title and continuous conversation. Use `/compress` to reduce its context. Conversations use the profile’s existing model account, tools, skills, memory, and session history.
 
 The app, [Hermes companion plugin](Companion/README.md), and [Cloudflare relay/push service](RelayService/README.md) are original code licensed under the [MIT license](LICENSE). This private repository contains the iOS app and its supporting source; the [companion/service repository](https://github.com/cyberculturedhq/hermes-jr-companion) is public. The remote-access and notification integration is a prototype validated locally, through Cloudflare staging, and on a physical iPhone.
 

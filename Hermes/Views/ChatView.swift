@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 
 struct ChatView: View {
     var sessionID: String? = nil
+    var botProfile: BotProfile? = nil
     @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var composerFrame: CGRect = .zero
@@ -24,6 +25,8 @@ struct ChatView: View {
     @State private var conversationWidth: CGFloat = 440
     @State private var conversationHeight: CGFloat = 0
     @State private var viewportHeight: CGFloat = 0
+    @State private var initialTranscriptPositioned = false
+    @State private var isPositioningInitialTranscript = false
     @State private var composerHeight: CGFloat = 56
     @State private var keyboardVisible = false
     @State private var isUserScrolling = false
@@ -52,6 +55,24 @@ struct ChatView: View {
         }
     }
 
+    private func positionInitialTranscript(using proxy: ScrollViewProxy) {
+        guard !initialTranscriptPositioned, !isPositioningInitialTranscript,
+              conversationHeight > 0, viewportHeight > 0,
+              !store.messages.isEmpty || store.sessionReady || !store.isLoadingMessages else { return }
+        isPositioningInitialTranscript = true
+        Task { @MainActor in
+            // NavigationStack changes the chat width during its push animation.
+            // Wait for that layout to settle before showing the cached page.
+            do { try await Task.sleep(for: .milliseconds(350)) } catch { return }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { scrollToLatest(using: proxy) }
+            await Task.yield()
+            withTransaction(transaction) { initialTranscriptPositioned = true }
+            isPositioningInitialTranscript = false
+        }
+    }
+
     private var commandQuery: String {
         guard composerFocused, !store.isSending, !store.isRunningCommand,
               !store.isLoadingMessages, draft != completedCommandDraft else { return "" }
@@ -64,12 +85,12 @@ struct ChatView: View {
     }
 
     private var visibleMessages: [ChatMessage] {
-        store.messages.filter { !($0.role == "assistant" && $0.isStreaming && $0.text.isEmpty) }
+        store.visibleWindowMessages.filter { !($0.role == "assistant" && $0.isStreaming && $0.text.isEmpty) }
     }
 
-    private func showsTimestamp(at index: Int) -> Bool {
-        guard let date = visibleMessages[index].timestamp else { return false }
-        guard index > 0, let previous = visibleMessages[index - 1].timestamp else { return true }
+    private func showsTimestamp(at index: Int, in messages: [ChatMessage]) -> Bool {
+        guard let date = messages[index].timestamp else { return false }
+        guard index > 0, let previous = messages[index - 1].timestamp else { return true }
         return !Calendar.current.isDate(date, inSameDayAs: previous) || date.timeIntervalSince(previous) >= 300
     }
 
@@ -89,6 +110,7 @@ struct ChatView: View {
     }
 
     private var sessionTitle: String {
+        if botProfile != nil || store.selectedSession?.title == "Bot Chat" { return "" }
         guard let sessionID else { return store.selectedSession?.name ?? "" }
         if let session = store.sessions.first(where: { $0.id == sessionID }) { return session.name }
         if let session = store.selectedSession, session.id == sessionID { return session.name }
@@ -96,58 +118,18 @@ struct ChatView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        let visibleMessages = self.visibleMessages
+        let lastUserID = visibleMessages.last(where: { $0.role == "user" })?.id
+        let hasUnread = store.selectedProfile.map {
+            store.isSessionUnread(sessionID ?? store.selectedSession?.id ?? "", profile: $0.id)
+        } ?? false
+        return ZStack(alignment: .bottom) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        Color.clear.frame(height: 12).id("conversation-content")
-                        
-    
-                        if store.isLoadingMessages && visibleMessages.isEmpty {
-                            ProgressView("Loading conversation…")
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 32)
-                                .accessibilityIdentifier("chat.loading")
-                        }
-
-                        if store.conversationRefresh.phase == .idle && store.messages.isEmpty && !store.isSending {
-                            ContentUnavailableView(
-                                "New Message",
-                                systemImage: "bubble.left.and.bubble.right",
-                                description: Text("Send a message to \(store.selectedProfile?.name ?? "Hermes").")
-                            )
-                        }
-    
-                        ForEach(Array(visibleMessages.enumerated()), id: \.element.id) { index, message in
-                            if let date = message.timestamp, showsTimestamp(at: index) {
-                                Text(timestampLabel(date))
-                                    .font(.caption).foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.top, index == 0 ? 0 : 16).padding(.bottom, 8)
-                                    .accessibilityIdentifier("chat.timestamp")
-                            }
-                            MessageRow(
-                                message: message,
-                                minimumOppositeSpace: max(0, conversationWidth - 40 - min(560, (conversationWidth - 40) * 0.78)),
-                                hasTail: index == visibleMessages.count - 1 || visibleMessages[index + 1].role != message.role,
-                                animateSend: canAnimateSends && message.delivery == .sending,
-                                composerFrame: composerFrame
-                            )
-                                .padding(.top, index == 0 ? 0 : (visibleMessages[index - 1].role == message.role ? 4 : 12))
-                                .id(message.id)
-                            if message.role == "user", let delivery = message.delivery,
-                               message.id == visibleMessages.last(where: { $0.role == "user" })?.id || delivery != .delivered {
-                                Text(delivery == .sending ? "Sending…" : delivery == .delivered ? "Delivered" : "Delivery unknown")
-                                    .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .trailing)
-                                    .padding(.trailing, 20).padding(.top, 6)
-                                    .contentTransition(.opacity)
-                                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: delivery)
-                                    .accessibilityIdentifier("chat.delivery")
-                            }
-                        }
-    
-                        Color.clear.frame(height: 1).id("conversation-bottom")
+                    // The bounded window stays eager so a very tall bubble
+                    // never changes its estimated height while scrolling.
+                    VStack(alignment: .leading, spacing: 0) {
+                        transcriptRows(visibleMessages, lastUserID: lastUserID, hasUnread: hasUnread, using: proxy)
                     }
                     .scrollTargetLayout()
                     .padding(.horizontal, 20)
@@ -155,6 +137,14 @@ struct ChatView: View {
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { conversationHeight = $0 }
                 }
                 .contentMargins(.bottom, composerHeight, for: .scrollContent)
+                .opacity(initialTranscriptPositioned ? 1 : 0)
+                .allowsHitTesting(initialTranscriptPositioned)
+                .overlay {
+                    if !initialTranscriptPositioned && botProfile == nil {
+                        ProgressView("Opening conversation…")
+                            .padding(.bottom, composerHeight)
+                    }
+                }
                 .accessibilityIdentifier("chat.transcript")
                 .scrollDismissesKeyboard(.interactively)
                 .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -175,22 +165,37 @@ struct ChatView: View {
                     viewportHeight = $0.height
                 }
                 .defaultScrollAnchor(.bottom, for: .initialOffset)
-                .defaultScrollAnchor(isAtBottom && conversationHeight > max(0, viewportHeight - composerHeight) ? .bottom : .top, for: .sizeChanges)
+                .defaultScrollAnchor(isAtBottom ? .bottom : .top, for: .sizeChanges)
                 .defaultScrollAnchor(.top, for: .alignment)
-                .onChange(of: store.messages.count) { previous, _ in
-                    if previous == 0 || isAtBottom { scrollToLatest(using: proxy) }
+                .onChange(of: store.sessionReady) { _, ready in
+                    guard ready else { return }
+                    if !initialTranscriptPositioned {
+                        positionInitialTranscript(using: proxy)
+                        return
+                    }
+                    guard isAtBottom, !isUserScrolling else { return }
+                    Task { @MainActor in
+                        await Task.yield()
+                        scrollToLatest(using: proxy)
+                    }
                 }
-                .onChange(of: store.messages.last?.text) { _, _ in
-                    if isAtBottom { scrollToLatest(using: proxy) }
-                }
-                .onChange(of: composerFocused) { _, focused in
-                    if focused { scrollToLatest(using: proxy) }
+                .onChange(of: conversationHeight) { oldHeight, newHeight in
+                    if !initialTranscriptPositioned {
+                        positionInitialTranscript(using: proxy)
+                        return
+                    }
+                    guard newHeight != oldHeight, isAtBottom, !isUserScrolling else { return }
+                    scrollToLatest(using: proxy)
                 }
                 .onChange(of: viewportHeight) { _, _ in
-                    if isAtBottom { scrollToLatest(using: proxy) }
+                    if initialTranscriptPositioned, isAtBottom, !isUserScrolling {
+                        scrollToLatest(using: proxy)
+                    } else {
+                        positionInitialTranscript(using: proxy)
+                    }
                 }
-                .onChange(of: conversationHeight) { _, height in
-                    if height <= max(0, viewportHeight - composerHeight) || isAtBottom { scrollToLatest(using: proxy) }
+                .onChange(of: composerFocused) { _, focused in
+                    if focused { Task { @MainActor in await Task.yield(); scrollToLatest(using: proxy) } }
                 }
             }
             // A persistent overlay lets messages pass behind the glass controls.
@@ -202,14 +207,23 @@ struct ChatView: View {
         .onAppear { canAnimateSends = true }
         .background(Color(uiColor: .systemBackground))
         .background(KeyboardWindowReference(view: keyboardReferenceView).allowsHitTesting(false))
-        .modifier(ChatNavigationTitle(botName: store.selectedProfile?.name ?? "Hermes", sessionTitle: sessionTitle, status: store.conversationRefresh, activity: headerActivity))
+        .modifier(ChatNavigationTitle(botName: botProfile?.name ?? store.selectedProfile?.name ?? "Hermes",
+                                      sessionTitle: sessionTitle, status: conversationStatus, activity: headerActivity))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if store.conversationRefresh.phase == .unavailable || store.conversationRefresh.phase == .failed {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Retry", systemImage: "arrow.clockwise") { Task { await store.retryContentConnection() } }
+                    Button("Retry", systemImage: "arrow.clockwise") {
+                        Task {
+                            if let botProfile { await store.openBotConversation(botProfile) }
+                            else { await store.retryContentConnection() }
+                        }
+                    }
                 }
             }
+        }
+        .task(id: botProfile?.id) {
+            if let botProfile { await store.openBotConversation(botProfile) }
         }
         .task(id: commandQuery) {
             await store.updateCommandSuggestions(commandQuery)
@@ -301,6 +315,25 @@ struct ChatView: View {
             }
             .interactiveDismissDisabled()
         }
+        .safeAreaInset(edge: .top) {
+            if let progress = store.selectedUpdateProgress, ["failed", "unconfirmed"].contains(progress.status) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(progress.status == "failed" ? "Companion update failed" : "Check companion update", systemImage: "exclamationmark.circle")
+                        .font(.headline)
+                    Text(progress.message).font(.footnote).foregroundStyle(.secondary)
+                    if progress.status == "failed" {
+                        Button("Try again") { Task { await store.retryCompanionUpdate() } }
+                            .disabled(!store.canRetryCompanionUpdate)
+                            .accessibilityIdentifier("companion.update-retry")
+                    } else {
+                        Button("Check update status") { Task { await store.refreshCompanionUpdate(force: true) } }
+                            .disabled(store.checkingCompanionUpdate || store.phase != .connected)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding().background(.regularMaterial)
+            }
+        }
         .alert(store.pendingSessionHandoff != nil || store.canRequestSessionHandoff ? "Move session here?" : "Unable to Continue", isPresented: Binding(
             get: { store.errorMessage != nil && !hasPendingPrompt },
             set: { if !$0 { store.errorMessage = nil } }
@@ -312,7 +345,9 @@ struct ChatView: View {
             } else if store.canRequestSessionHandoff {
                 Button("Continue on iPhone…") { Task { if await store.prepareSessionHandoff() { sendAfterHandoff() } } }
             }
-            if store.messages.isEmpty,
+            if let botProfile, store.messages.isEmpty {
+                Button("Retry") { Task { await store.openBotConversation(botProfile) } }
+            } else if store.messages.isEmpty,
                let session = store.selectedSession ?? store.sessions.first(where: { $0.id == sessionID }) {
                 Button("Retry") { Task { await store.openSession(session) } }
             }
@@ -323,6 +358,122 @@ struct ChatView: View {
             }
         } message: {
             Text((store.errorMessage ?? "").components(separatedBy: "\nDetails:").first ?? "")
+        }
+    }
+
+    @ViewBuilder
+    private func transcriptRows(_ visibleMessages: [ChatMessage], lastUserID: String?,
+                                hasUnread: Bool, using proxy: ScrollViewProxy) -> some View {
+        Color.clear.frame(height: 12).id("conversation-content")
+        if store.hasEarlierLoadedMessages || store.hasOlderMessages {
+            Button {
+                loadOlder(using: proxy)
+            } label: {
+                if store.isLoadingOlderMessages { ProgressView() }
+                else { Text(hasUnread ? "Earlier unread messages" : "Earlier messages") }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .disabled(store.isLoadingOlderMessages)
+            .accessibilityIdentifier("chat.loadOlder")
+            .id("history-top-\(store.olderPageVersion)-\(store.messageWindowStart)")
+        }
+
+        if store.isLoadingMessages && visibleMessages.isEmpty && botProfile == nil {
+            ProgressView("Loading conversation…")
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 32)
+                .accessibilityIdentifier("chat.loading")
+        }
+
+        if store.conversationRefresh.phase == .idle && store.messages.isEmpty && !store.isSending {
+            ContentUnavailableView(
+                "New Message",
+                systemImage: "bubble.left.and.bubble.right",
+                description: Text("Send a message to \(store.selectedProfile?.name ?? "Hermes").")
+            )
+        }
+
+        ForEach(Array(visibleMessages.enumerated()), id: \.element.id) { index, message in
+            if let date = message.timestamp, showsTimestamp(at: index, in: visibleMessages) {
+                Text(timestampLabel(date))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, index == 0 ? 0 : 16).padding(.bottom, 8)
+                    .accessibilityIdentifier("chat.timestamp")
+            }
+            MessageRow(
+                message: message,
+                minimumOppositeSpace: max(0, conversationWidth - 40 - min(560, (conversationWidth - 40) * 0.78)),
+                hasTail: index == visibleMessages.count - 1 || visibleMessages[index + 1].role != message.role,
+                animateSend: canAnimateSends && message.delivery == .sending,
+                composerFrame: message.delivery == .sending ? composerFrame : .zero
+            )
+                .equatable()
+                .padding(.top, index == 0 ? 0 : (visibleMessages[index - 1].role == message.role ? 4 : 12))
+                .id(message.id)
+                .onAppear { noteVisibleMessage(message.id, firstID: visibleMessages.first?.id) }
+                .onChange(of: store.sessionReady) { _, ready in
+                    if ready { noteVisibleMessage(message.id, firstID: visibleMessages.first?.id) }
+                }
+                .onChange(of: store.hasOlderMessages) { _, _ in
+                    noteVisibleMessage(message.id, firstID: visibleMessages.first?.id)
+                }
+            if message.role == "user", let delivery = message.delivery,
+               message.id == lastUserID || delivery != .delivered {
+                Text(delivery == .sending ? "Sending…" : delivery == .delivered ? "Delivered" : "Delivery unknown")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.trailing, 20).padding(.top, 6)
+                    .contentTransition(.opacity)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: delivery)
+                    .accessibilityIdentifier("chat.delivery")
+            }
+        }
+        if store.hasNewerLoadedMessages {
+            Button("Newer messages") { showNewer(using: proxy) }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .accessibilityIdentifier("chat.loadNewer")
+                .id("history-bottom-\(store.messageWindowStart)")
+        }
+
+        Color.clear.frame(height: 1).id("conversation-bottom")
+    }
+
+    private var conversationStatus: ContentRefreshStatus {
+        if let botProfile, store.selectedProfile?.id != botProfile.id {
+            return ContentRefreshStatus(phase: .checking)
+        }
+        return store.conversationRefresh
+    }
+
+    private func loadOlder(using proxy: ScrollViewProxy) {
+        guard !store.isLoadingOlderMessages else { return }
+        let preservePosition = conversationHeight > max(0, viewportHeight - composerHeight)
+        if let anchor = store.showEarlierLoadedMessages() {
+            if preservePosition { Task { await Task.yield(); proxy.scrollTo(anchor, anchor: .top) } }
+            return
+        }
+        guard store.hasOlderMessages else { return }
+        Task {
+            guard let anchor = await store.loadOlderMessages(), preservePosition else { return }
+            await Task.yield()
+            proxy.scrollTo(anchor, anchor: .top)
+        }
+    }
+
+    private func showNewer(using proxy: ScrollViewProxy) {
+        guard let anchor = store.showNewerLoadedMessages() else { return }
+        Task { await Task.yield(); proxy.scrollTo(anchor, anchor: .bottom) }
+    }
+
+    private func noteVisibleMessage(_ id: String, firstID: String?) {
+        guard store.sessionReady, let profile = store.selectedProfile, let session = store.selectedSession,
+              session.id == sessionID, store.isSessionUnread(session.id, profile: profile.id) else { return }
+        let boundary = store.unreadBoundary(profile: profile.id, sessionID: session.id)
+        if id == boundary || (!store.hasOlderMessages && !store.hasEarlierLoadedMessages && id == firstID) {
+            store.markSessionRead(session.id, profile: profile.id)
         }
     }
 
@@ -657,7 +808,7 @@ private struct OutgoingSendAnimation: ViewModifier {
     }
 }
 
-private struct MessageRow: View {
+private struct MessageRow: View, Equatable {
     let message: ChatMessage
     var minimumOppositeSpace: CGFloat = 88
     var hasTail = true
@@ -784,13 +935,15 @@ private struct ChatNavigationTitle: ViewModifier {
                     ToolbarItem(placement: .principal) {
                         VStack(spacing: 2) {
                             Text(botName).font(.headline).lineLimit(1)
-                            Text(subtitle)
+                            if !subtitle.isEmpty {
+                                Text(subtitle)
                                 .font(.subheadline).foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .modifier(ActivityTextShimmer(active: activity != nil))
                                 .contentTransition(.opacity)
                                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: subtitle)
                                 .accessibilityIdentifier("chat.headerStatus")
+                            }
                         }
                     }
                 }

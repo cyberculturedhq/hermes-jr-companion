@@ -229,15 +229,44 @@ extension AppStore {
             if updateProgress == nil, let data = UserDefaults.standard.data(forKey: context.account + "/update-request") {
                 updateProgress = try? JSONDecoder().decode(CompanionUpdateProgress.self, from: data)
             }
-            if let progress = updateProgress, progress.pending, updateTrackingSupported {
-                if let result = try? await context.client.companionAPI("update-requests/" + progress.receipt.id, enrollment: context.enrollment),
-                   isCurrent(context), let status = result["status"] as? String,
-                   ["queued", "running", "completed", "failed"].contains(status) {
-                    updateProgress?.status = status
-                    updateProgress?.installed = result["installed"] as? String
-                    updateProgress?.error = result["error"] as? String
+            if let progress = updateProgress, progress.status != "completed", updateTrackingSupported {
+                do {
+                    let result = try await context.client.companionAPI("update-requests/" + progress.receipt.id, enrollment: context.enrollment)
+                    guard isCurrent(context), updateProgress?.receipt.id == progress.receipt.id,
+                          let status = result["status"] as? String,
+                          ["queued", "running", "completed", "failed"].contains(status) else { return }
+                    // A queued receipt does not undo a confirmed model failure.
+                    // A running installer or verified completion still takes precedence.
+                    if status != "queued" || updateProgress?.status != "failed" {
+                        updateProgress?.status = status
+                        updateProgress?.installed = result["installed"] as? String
+                        updateProgress?.error = result["error"] as? String
+                    }
                     saveUpdateProgress()
+                } catch let failure as HermesHTTPError where failure.statusCode == 404 {
+                    // A backend restart can erase its in-memory failed-turn
+                    // snapshot. An explicitly reopened, idle chat plus a missing
+                    // installer receipt still gives the user a recovery path.
+                    if isCurrent(context), updateProgress?.receipt.id == progress.receipt.id,
+                       selectedUpdateProgress != nil, sessionReady, !isSending,
+                       !startingCompanionUpdate, !context.client.isRemoteTurnRunning {
+                        failCompanionUpdate("Hermes is no longer working on this request, and the update hasn’t been verified. Try again.")
+                    }
+                } catch {
+                    // An unavailable status endpoint is not evidence of failure.
                 }
+            }
+            guard isCurrent(context) else { return }
+            if let progress = updateProgress,
+               ["requested", "queued", "failed", "unconfirmed"].contains(progress.status),
+               let installed = installedCompanionVersion.flatMap(CompanionUpdateNotice.components),
+               let target = CompanionUpdateNotice.components(progress.receipt.target),
+               !installed.lexicographicallyPrecedes(target) {
+                // A separate host update can satisfy an older request without
+                // completing its receipt. Retire the obsolete attempt rather
+                // than claim that its installer verified completion.
+                updateProgress = nil
+                UserDefaults.standard.removeObject(forKey: context.account + "/update-request")
             }
             if installedCompanionVersion != nil && (force || update["checks_enabled"] as? Bool != false) {
                 let release = try await CompanionReleaseFeed.shared.latest(force: force)
@@ -268,7 +297,32 @@ extension AppStore {
         phase == .connected && profiles.contains(where: { $0.id == "default" }) &&
         (settings?.companion?.deviceID ?? enrollment?.deviceID) != nil &&
         !startingCompanionUpdate && !isSending && !isRunningCommand && !isLoadingMessages &&
-        !isSwitchingConversation && updateProgress?.pending != true
+        !isSwitchingConversation && openingBotProfileID == nil && updateProgress?.pending != true
+    }
+
+    var canRetryCompanionUpdate: Bool {
+        phase == .connected && updateProgress?.status == "failed" &&
+        profiles.contains(where: { $0.id == updateProgress?.receipt.profile }) &&
+        !startingCompanionUpdate && !isSending && !isRunningCommand &&
+        !checkingCompanionUpdate && !isLoadingMessages && !isSwitchingConversation && openingBotProfileID == nil
+    }
+
+    var selectedUpdateProgress: CompanionUpdateProgress? {
+        guard let progress = updateProgress, progress.receipt.profile == selectedProfile?.id,
+              progress.receipt.session_id == selectedSession?.id else { return nil }
+        return progress
+    }
+
+    private var isSelectedUpdateUnfinished: Bool {
+        selectedUpdateProgress.map { $0.status != "completed" } ?? false
+    }
+
+    private func failCompanionUpdate(_ message: String) {
+        guard updateProgress?.status != "completed" else { return }
+        updateProgress?.status = "failed"
+        let visible = message.components(separatedBy: "\nDetails:").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        updateProgress?.error = visible.isEmpty ? "The update did not complete. Try again." : visible
+        saveUpdateProgress()
     }
 
     func startCompanionUpdate(_ notice: CompanionUpdateNotice) async {
@@ -277,10 +331,13 @@ extension AppStore {
               let deviceID = settings?.companion?.deviceID ?? enrollment?.deviceID else { return }
         startingCompanionUpdate = true
         defer { startingCompanionUpdate = false }
+        updateDestination = nil
         // Select and create through the normal conversation lifecycle. No prompt is sent before this explicit action.
-        await selectProfile(profile)
+        // The full session list and notification follow request are unnecessary
+        // prerequisites for opening a new update conversation.
+        await selectProfile(profile, refresh: false)
         guard isCurrent(context), selectedProfile?.id == profile.id else { return }
-        await createSession()
+        await createSession(followInBackground: true)
         guard isCurrent(context), sessionReady, let session = selectedSession else { return }
         let receipt = CompanionUpdateReceipt(id: UUID().uuidString.lowercased(), device_id: deviceID.lowercased(),
             profile: profile.id, session_id: session.id, target: notice.version, notify: notificationsEnabled,
@@ -292,9 +349,13 @@ extension AppStore {
             let prompt = try receipt.prompt
             showingSettings = false
             updateDestination = FollowedConversation(profile: profile.id, sessionID: session.id)
-            // send waits for the streamed turn. The persisted receipt prevents repeated taps or relaunches from submitting twice.
-            _ = await sendPrompt(prompt, displayText: "Update my Hermes Jr. companion to version " + notice.version + (receipt.notify ? " and notify me when the verified update is complete." : "."), photos: [])
+            // Keep the short user-facing message when persisted history is reloaded.
+            let accepted = await sendPrompt(prompt, displayText: receipt.displayText, photos: [])
             guard isCurrent(context) else { return }
+            if !accepted {
+                failCompanionUpdate(errorMessage ?? "The update request was not sent. Check the connection and try again.")
+                errorMessage = nil
+            }
             await refreshCompanionUpdate()
         } catch {
             guard isCurrent(context) else { return }
@@ -302,6 +363,40 @@ extension AppStore {
             updateProgress?.error = "The update request could not be started. No update prompt was sent. Try again when connected."
             saveUpdateProgress()
             updateCheckMessage = updateProgress?.error
+        }
+    }
+
+    func retryCompanionUpdate() async {
+        guard canRetryCompanionUpdate, let context = notificationContext(), let receipt = updateProgress?.receipt else { return }
+        startingCompanionUpdate = true
+        defer { startingCompanionUpdate = false }
+        // Recheck the durable installer receipt before resubmitting. Reuse its
+        // identity so a retried tool cannot start a duplicate verified install.
+        await refreshCompanionUpdate()
+        guard isCurrent(context), updateProgress?.receipt.id == receipt.id,
+              updateProgress?.status == "failed" else { return }
+        await openUpdateConversation()
+        guard isCurrent(context), sessionReady, selectedSession?.id == receipt.session_id,
+              updateProgress?.status == "failed", !client.isRemoteTurnRunning else { return }
+        do {
+            let retryReceipt = Date().timeIntervalSince1970 - receipt.created >= 86400
+                ? CompanionUpdateReceipt(id: UUID().uuidString.lowercased(), device_id: receipt.device_id,
+                    profile: receipt.profile, session_id: receipt.session_id, target: receipt.target,
+                    notify: receipt.notify, created: Date().timeIntervalSince1970)
+                : receipt
+            let prompt = try retryReceipt.prompt
+            updateProgress = CompanionUpdateProgress(receipt: retryReceipt)
+            errorMessage = nil
+            saveUpdateProgress()
+            let accepted = await sendPrompt(prompt, displayText: retryReceipt.displayText, photos: [])
+            guard isCurrent(context) else { return }
+            if !accepted {
+                failCompanionUpdate(errorMessage ?? "The update request was not sent. Check the connection and try again.")
+                errorMessage = nil
+            }
+            await refreshCompanionUpdate()
+        } catch {
+            if isCurrent(context) { failCompanionUpdate("The update request could not be started. Check the connection and try again.") }
         }
     }
 
@@ -315,6 +410,7 @@ extension AppStore {
         if selectedSession?.id == session.id {
             updateDestination = nil
             updateDestination = FollowedConversation(profile: profile.id, sessionID: session.id)
+            await refreshCompanionUpdate()
         }
     }
 
@@ -598,11 +694,11 @@ extension AppStore {
                     if notificationsEnabled { startPresence() }
                     repeat {
                         let wasRunning = connection.isRemoteTurnRunning
-                        let transcript = try await connection.messages(profile: profile.id, sessionID: session.id)
+                        let page = try await connection.visibleMessagePage(profile: profile.id, sessionID: session.id)
                         guard !Task.isCancelled, generation == attempt, selectedSession?.id == session.id else { return }
-                        if !transcript.isEmpty { messages = transcript }
+                        if !page.messages.isEmpty { mergeRecentMessages(page) }
                         sessionReady = true
-                        cacheConversation(transcript, profile: profile.id, sessionID: session.id)
+                        cacheConversation(messages, profile: profile.id, sessionID: session.id)
                         if !wasRunning { break }
                         try await Task.sleep(for: .seconds(2))
                     } while appIsActive
@@ -649,7 +745,8 @@ extension AppStore {
     func processPendingNotification() async {
         guard let reference = PushNotifications.shared.pendingReference,
               let context = notificationContext(), !wasBackgrounded, !isSending, !isRunningCommand,
-              !isLoadingMessages, !isSwitchingConversation, openingNotificationReference == nil else { return }
+              !isLoadingMessages, !isSwitchingConversation, openingBotProfileID == nil,
+              openingNotificationReference == nil else { return }
         openingNotificationReference = reference
         let lookupGeneration = generation
         defer {
@@ -748,6 +845,18 @@ final class AppStore {
     var settings: ConnectionSettings? { didSet { loadReadState() } }
     var isLoadingSessions = false
     var isLoadingMessages = false
+    var isLoadingOlderMessages = false
+    var hasOlderMessages = false
+    var olderPageVersion = 0
+    var messageWindowStart = 0
+    private static let messageWindowSize = 40
+    var visibleWindowMessages: [ChatMessage] {
+        Array(messages.dropFirst(messageWindowStart).prefix(Self.messageWindowSize))
+    }
+    var hasEarlierLoadedMessages: Bool { messageWindowStart > 0 }
+    var hasNewerLoadedMessages: Bool { messageWindowStart + Self.messageWindowSize < messages.count }
+    @ObservationIgnored private var historyOffset = 0
+    @ObservationIgnored private var rawMessagePositions: [String: Int] = [:]
     var profileRefresh = ContentRefreshStatus()
     var sessionRefresh = ContentRefreshStatus()
     var conversationRefresh = ContentRefreshStatus()
@@ -772,6 +881,16 @@ final class AppStore {
     struct ConversationReadState: Codable {
         var unread: Set<FollowedConversation> = []
         var awaitingReply: [FollowedConversation: String] = [:]
+        var lastReadMessageIDs: [FollowedConversation: String] = [:]
+
+        enum CodingKeys: String, CodingKey { case unread, awaitingReply, lastReadMessageIDs }
+        init() {}
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            unread = try values.decodeIfPresent(Set<FollowedConversation>.self, forKey: .unread) ?? []
+            awaitingReply = try values.decodeIfPresent([FollowedConversation: String].self, forKey: .awaitingReply) ?? [:]
+            lastReadMessageIDs = try values.decodeIfPresent([FollowedConversation: String].self, forKey: .lastReadMessageIDs) ?? [:]
+        }
     }
     var conversationReadState = ConversationReadState()
 
@@ -792,7 +911,20 @@ final class AppStore {
     }
 
     func markSessionRead(_ id: String, profile: String) {
-        if conversationReadState.unread.remove(FollowedConversation(profile: profile, sessionID: id)) != nil { persistReadState() }
+        let key = FollowedConversation(profile: profile, sessionID: id)
+        var changed = false
+        if let latestID = messages.last?.id, selectedSession?.id == id, selectedProfile?.id == profile {
+            changed = conversationReadState.lastReadMessageIDs[key] != latestID
+            conversationReadState.lastReadMessageIDs[key] = latestID
+        }
+        if conversationReadState.unread.remove(key) != nil { changed = true }
+        if changed { persistReadState() }
+    }
+
+    func unreadBoundary(profile: String, sessionID: String) -> String? {
+        let key = FollowedConversation(profile: profile, sessionID: sessionID)
+        guard conversationReadState.unread.contains(key) else { return nil }
+        return conversationReadState.lastReadMessageIDs[key]
     }
 
     private func assistantMarker(_ rows: [ChatMessage]) -> String {
@@ -806,6 +938,9 @@ final class AppStore {
         if appIsActive && visibleSessionID == sessionID && selectedProfile?.id == profile {
             conversationReadState.unread.remove(key)
         } else {
+            if !conversationReadState.unread.contains(key), conversationReadState.lastReadMessageIDs[key] == nil {
+                conversationReadState.lastReadMessageIDs[key] = cachedContent.conversations[profile]?[sessionID]?.value.last?.id
+            }
             conversationReadState.unread.insert(key)
         }
         persistReadState()
@@ -837,6 +972,10 @@ final class AppStore {
         case "clarify.request": sessionActivities[key] = "Waiting for your answer"
         case "message.complete":
             sessionActivities[key] = nil
+            if updateProgress?.receipt.profile == profile, updateProgress?.receipt.session_id == sessionID,
+               ["error", "interrupted"].contains(payload["status"] as? String ?? "") {
+                failCompanionUpdate(payload["text"] as? String ?? "Hermes could not complete the update request. Try again.")
+            }
             if payload["status"] as? String != "error" && payload["status"] as? String != "interrupted" {
                 noteAssistantReply(profile: profile, sessionID: sessionID)
             }
@@ -874,10 +1013,10 @@ final class AppStore {
             repeat {
                 let running = connection.isRemoteTurnRunning
                 do {
-                    let transcript = try await connection.messages(profile: profile.id, sessionID: session.id)
+                    let page = try await connection.visibleMessagePage(profile: profile.id, sessionID: session.id)
                     guard !Task.isCancelled, generation == attempt, client === connection else { return }
-                    if !transcript.isEmpty { messages = transcript }
-                    cacheConversation(transcript, profile: profile.id, sessionID: session.id)
+                    if !page.messages.isEmpty { mergeRecentMessages(page) }
+                    cacheConversation(messages, profile: profile.id, sessionID: session.id)
                     activity = sessionActivities[FollowedConversation(profile: profile.id, sessionID: session.id)]
                     if !running { break }
                     try await Task.sleep(for: .seconds(1))
@@ -1085,10 +1224,54 @@ final class AppStore {
         }
     }
 
-    func selectProfile(_ profile: BotProfile) async {
-        guard !isRunningCommand, !isLoadingMessages, !isSwitchingConversation else { return }
-        isSwitchingConversation = true
-        defer { isSwitchingConversation = false }
+    private(set) var openingBotProfileID: String?
+    @ObservationIgnored private var botOpenID: UUID?
+
+    func openBotConversation(_ profile: BotProfile) async {
+        guard !isRunningCommand, !isLoadingMessages, !isSwitchingConversation,
+              openingBotProfileID == nil, openingNotificationReference == nil, !Task.isCancelled else { return }
+        let openID = UUID()
+        botOpenID = openID
+        openingBotProfileID = profile.id
+        defer {
+            if botOpenID == openID { botOpenID = nil; openingBotProfileID = nil }
+        }
+        let connection = client
+        let attempt = await prepareConversationSwitch()
+        guard !Task.isCancelled, client === connection, generation == attempt, botOpenID == openID else { return }
+        selectedProfile = profile
+        selectedSession = nil
+        sessions = cachedContent.sessions[profile.id]?.value ?? []
+        messages = []
+        sessionReady = false
+        messageWindowStart = 0
+        hasOlderMessages = false
+        resetCommands()
+        errorMessage = nil
+        conversationRefresh = ContentRefreshStatus(phase: .checking)
+        do {
+            guard phase == .connected else {
+                throw HermesError.message("Reconnect to Hermes to open this bot conversation.")
+            }
+            let session = try await connection.botSession(profile: profile.id)
+            guard !Task.isCancelled, client === connection, generation == attempt,
+                  botOpenID == openID, phase == .connected else { return }
+            cacheBotSession(session, profile: profile.id)
+            persistContent()
+            // The detail screen is already visible. Use the normal history and resume path.
+            await openSession(session, in: profile, notificationReference: nil, preparedGeneration: attempt)
+        } catch {
+            guard !Task.isCancelled, client === connection, generation == attempt, botOpenID == openID else { return }
+            conversationRefresh.phase = .failed
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func selectProfile(_ profile: BotProfile, refresh: Bool = true) async {
+        guard !isRunningCommand, !isLoadingMessages, !isSwitchingConversation, openingBotProfileID == nil else { return }
+        let switchID = UUID()
+        conversationSwitchID = switchID
+        defer { if conversationSwitchID == switchID { conversationSwitchID = nil } }
         await prepareConversationSwitch()
         selectedProfile = profile
         selectedSession = nil
@@ -1101,7 +1284,7 @@ final class AppStore {
         resetCommands()
         errorMessage = nil
         if let prepared { cacheSessions(prepared, profile: profile.id) }
-        else if phase == .connected { await refreshSessions() }
+        else if phase == .connected && refresh { await refreshSessions() }
     }
 
     func refreshSessions() async {
@@ -1136,24 +1319,129 @@ final class AppStore {
     }
 
     func openSession(_ session: HermesSession) async {
+        guard openingBotProfileID == nil else { return }
         guard let profile = selectedProfile else { return }
         await openSession(session, in: profile, notificationReference: nil)
     }
 
-    private func openSession(_ session: HermesSession, in profile: BotProfile, notificationReference: String?) async {
+    /// Prepend one page when the top of the transcript becomes visible.
+    /// Returns the previous first row so the view can keep it in place.
+    func loadOlderMessages() async -> String? {
+        guard phase == .connected, sessionReady, hasOlderMessages, !hasEarlierLoadedMessages, !isLoadingOlderMessages,
+              let profile = selectedProfile, let session = selectedSession else { return nil }
+        let connection = client
+        let attempt = generation
+        let anchor = messages.first?.id
+        let startingOffset = historyOffset
+        isLoadingOlderMessages = true
+        defer { isLoadingOlderMessages = false }
+        do {
+            while historyOffset - startingOffset < 100_000 {
+                let offset = historyOffset
+                let page = try await connection.visibleMessagePage(profile: profile.id, sessionID: session.id, offset: offset, visibleLimit: 30)
+                guard attempt == generation, client === connection, selectedSession?.id == session.id,
+                      historyOffset == offset else { return nil }
+                historyOffset += page.returned
+                hasOlderMessages = page.hasOlder
+                olderPageVersion += 1
+                for (message, position) in zip(page.messages, page.offsetsFromNewest) {
+                    rawMessagePositions[message.id] = offset + position
+                }
+                let existing = Set(messages.map(\.id))
+                let older = page.messages.filter { !existing.contains($0.id) }
+                if !older.isEmpty {
+                    messages.insert(contentsOf: older, at: 0)
+                    return anchor
+                }
+                guard page.hasOlder && page.returned > 0 else { return nil }
+            }
+            throw HermesError.message("This conversation has too many overlapping history records to locate earlier messages.")
+        } catch {
+            if attempt == generation, selectedSession?.id == session.id { errorMessage = error.localizedDescription }
+            return nil
+        }
+    }
+
+    func showEarlierLoadedMessages() -> String? {
+        guard hasEarlierLoadedMessages else { return nil }
+        let anchor = visibleWindowMessages.first?.id
+        messageWindowStart = max(0, messageWindowStart - 30)
+        return anchor
+    }
+
+    func showNewerLoadedMessages() -> String? {
+        guard hasNewerLoadedMessages else { return nil }
+        let anchor = visibleWindowMessages.last?.id
+        messageWindowStart = min(max(0, messages.count - Self.messageWindowSize), messageWindowStart + 30)
+        return anchor
+    }
+
+    private func setLatestPage(_ page: HermesClient.MessagePage) {
+        messages = updateDisplayMessages(page.messages)
+        messageWindowStart = 0
+        historyOffset = page.returned
+        hasOlderMessages = page.hasOlder
+        rawMessagePositions = Dictionary(uniqueKeysWithValues: zip(page.messages.map(\.id), page.offsetsFromNewest))
+    }
+
+    private func mergeRecentMessages(_ page: HermesClient.MessagePage) {
+        let recent = updateDisplayMessages(page.messages)
+        guard !recent.isEmpty else { return }
+        let wasShowingNewest = !hasNewerLoadedMessages
+        let recentIDs = Set(recent.map(\.id))
+        if let overlap = messages.firstIndex(where: { recentIDs.contains($0.id) }),
+           let shared = zip(recent, page.offsetsFromNewest).first(where: { rawMessagePositions[$0.0.id] != nil }),
+           let oldPosition = rawMessagePositions[shared.0.id], shared.1 >= oldPosition {
+            // The server offset includes hidden/tool rows too. Move the older
+            // page boundary by the raw change, not the visible message count.
+            let shift = shared.1 - oldPosition
+            historyOffset += shift
+            rawMessagePositions = rawMessagePositions.mapValues { $0 + shift }
+            for (message, position) in zip(recent, page.offsetsFromNewest) {
+                rawMessagePositions[message.id] = position
+            }
+            messages = Array(messages[..<overlap]) + recent
+            let keptIDs = Set(messages.map(\.id))
+            rawMessagePositions = rawMessagePositions.filter { keptIDs.contains($0.key) }
+        } else {
+            messages = recent
+            historyOffset = page.returned
+            hasOlderMessages = page.hasOlder
+            rawMessagePositions = Dictionary(uniqueKeysWithValues: zip(recent.map(\.id), page.offsetsFromNewest))
+        }
+        messageWindowStart = wasShowingNewest ? max(0, messages.count - Self.messageWindowSize)
+                                              : min(messageWindowStart, max(0, messages.count - Self.messageWindowSize))
+    }
+
+    private func updateDisplayMessages(_ rows: [ChatMessage]) -> [ChatMessage] {
+        guard let progress = selectedUpdateProgress else { return rows }
+        return rows.map { row in
+            guard row.role == "user", row.text.hasPrefix("Update my Hermes Jr. companion to version "),
+                  row.text.contains("--receipt ") else { return row }
+            var visible = row
+            visible.text = progress.receipt.displayText
+            return visible
+        }
+    }
+
+    private func openSession(_ session: HermesSession, in profile: BotProfile, notificationReference: String?,
+                             preparedGeneration: Int? = nil) async {
         guard !isRunningCommand, !isLoadingMessages, !isSwitchingConversation else { return }
-        isSwitchingConversation = true
-        defer { isSwitchingConversation = false }
+        let switchID = UUID()
+        conversationSwitchID = switchID
+        defer { if conversationSwitchID == switchID { conversationSwitchID = nil } }
         let connection = client
         let reopeningCurrentSession = selectedProfile?.id == profile.id && selectedSession?.id == session.id
         let attempt: Int
-        if !reopeningCurrentSession {
+        if let preparedGeneration {
+            attempt = preparedGeneration
+        } else if !reopeningCurrentSession {
             attempt = await prepareConversationSwitch()
         } else {
             guard !isSending else { return }
             attempt = generation
         }
-        guard generation == attempt, client === connection else { return }
+        guard !Task.isCancelled, generation == attempt, client === connection else { return }
         if let notificationReference {
             guard PushNotifications.shared.pendingReference == notificationReference else { return }
         }
@@ -1167,10 +1455,14 @@ final class AppStore {
         if !sessions.contains(where: { $0.id == session.id }) { sessions.insert(session, at: 0) }
         selectedSession = session
         sessionReady = false
+        messageWindowStart = 0
+        hasOlderMessages = false
+        historyOffset = 0
+        rawMessagePositions = [:]
         conversationRefresh = ContentRefreshStatus(phase: phase == .connected ? .checking : phase == .restoring ? .connecting : .unavailable,
                                                     updatedAt: cachedContent.conversations[profile.id]?[session.id]?.updatedAt)
         if !reopeningCurrentSession {
-            messages = cachedContent.conversations[profile.id]?[session.id]?.value ?? []
+            messages = Array((cachedContent.conversations[profile.id]?[session.id]?.value ?? []).suffix(10))
             resetCommands()
         }
         errorMessage = nil
@@ -1187,11 +1479,14 @@ final class AppStore {
         do {
             try await connection.openSession(profile: profile.id, sessionID: session.id)
             guard attempt == generation, client === connection, selectedSession?.id == session.id else { return }
-            let transcript = try await connection.messages(profile: profile.id, sessionID: session.id)
+            if selectedUpdateProgress != nil, let failure = connection.lastTurnFailure {
+                failCompanionUpdate(failure)
+            }
+            let page = try await connection.visibleMessagePage(profile: profile.id, sessionID: session.id)
             guard attempt == generation, client === connection, selectedSession?.id == session.id else { return }
-            messages = transcript
+            setLatestPage(page)
             sessionReady = true
-            cacheConversation(transcript, profile: profile.id, sessionID: session.id)
+            cacheConversation(messages, profile: profile.id, sessionID: session.id)
             await noteOpened(profile: profile.id, sessionID: session.id)
             watchRunningConversation(profile: profile, session: session)
         } catch {
@@ -1211,10 +1506,12 @@ final class AppStore {
 
     var pendingSessionHandoff: SessionHandoff?
     var isPreparingHandoff = false
-    private var isSwitchingConversation = false
+    private var conversationSwitchID: UUID?
+    private var isSwitchingConversation: Bool { conversationSwitchID != nil }
 
     var canRequestSessionHandoff: Bool {
         pendingSessionHandoff == nil && !isPreparingHandoff && selectedSession != nil &&
+        selectedSession?.title != "Bot Chat" &&
         (errorMessage?.contains("This chat is open in another Hermes window/terminal") == true)
     }
 
@@ -1279,11 +1576,12 @@ final class AppStore {
         return false
     }
 
-    func createSession() async {
+    func createSession(followInBackground: Bool = false) async {
         guard phase == .connected else { return }
         guard let profile = selectedProfile, !isRunningCommand, !isLoadingMessages, !isSwitchingConversation else { return }
-        isSwitchingConversation = true
-        defer { isSwitchingConversation = false }
+        let switchID = UUID()
+        conversationSwitchID = switchID
+        defer { if conversationSwitchID == switchID { conversationSwitchID = nil } }
         await prepareConversationSwitch()
         errorMessage = nil
         isLoadingMessages = true
@@ -1298,7 +1596,13 @@ final class AppStore {
             conversationRefresh = ContentRefreshStatus(phase: .idle, updatedAt: Date())
             messages = []
             resetCommands()
-            await noteOpened(profile: profile.id, sessionID: session.id)
+            if followInBackground {
+                let connection = client
+                Task { [weak self] in
+                    guard let self, self.client === connection else { return }
+                    await self.noteOpened(profile: profile.id, sessionID: session.id)
+                }
+            } else { await noteOpened(profile: profile.id, sessionID: session.id) }
         } catch { if attempt == generation { errorMessage = error.localizedDescription } }
     }
 
@@ -1358,7 +1662,7 @@ final class AppStore {
         }
 
         do {
-            if photos.contains(where: { $0.isFile == true }), settings?.companion == nil, enrollment == nil {
+            if (photos.contains(where: { $0.isFile == true }) || connection.isBotConversation), settings?.companion == nil, enrollment == nil {
                 do {
                     let result = try await connection.companionAPI("enroll", method: "POST", body: ["device_name": "Hermes Jr. iPhone"])
                     guard attempt == generation, client === connection else { return false }
@@ -1379,10 +1683,21 @@ final class AppStore {
             guard attempt == generation, client === connection else { return true }
             if wasBackgrounded { return true }
             let photoPaths = connection.lastSentPhotoPaths
+            let currentID = connection.storedSessionID ?? session.id
+            if currentID != session.id {
+                var current = session
+                current.id = currentID
+                selectedSession = current
+                if var bot = profiles.first(where: { $0.id == profile.id })?.botSession, bot.id == session.id {
+                    bot.id = currentID
+                    cacheBotSession(bot, profile: profile.id)
+                }
+            }
             // Read the persisted transcript after the server completes. Hermes remains the source
             // of truth for tool output, compaction, and messages from other clients.
-            if var transcript = try? await connection.messages(profile: profile.id, sessionID: session.id),
-               !transcript.isEmpty, attempt == generation, client === connection {
+            if let page = try? await connection.visibleMessagePage(profile: profile.id, sessionID: currentID),
+               !page.messages.isEmpty, attempt == generation, client === connection {
+                var transcript = page.messages
                 // Keep this device's preview for the just-sent photo. Older server images still
                 // use the transcript's attachment placeholder until media history is supported.
                 if !photos.isEmpty, !photoPaths.isEmpty, let index = transcript.lastIndex(where: {
@@ -1391,8 +1706,9 @@ final class AppStore {
                     transcript[index].photos = photos
                     transcript[index].text = prompt
                 }
-                messages = transcript
-                cacheConversation(transcript, profile: profile.id, sessionID: session.id)
+                mergeRecentMessages(HermesClient.MessagePage(messages: transcript, returned: page.returned,
+                                                            hasOlder: page.hasOlder, offsetsFromNewest: page.offsetsFromNewest))
+                cacheConversation(messages, profile: profile.id, sessionID: currentID)
             }
             guard attempt == generation, client === connection else { return true }
             Task { [weak self] in
@@ -1416,13 +1732,30 @@ final class AppStore {
                 messages[index].delivery = .unknown
             }
             if error is ConversationSuspended || wasBackgrounded { return true }
+            if case HermesSendError.turnFailed(let text) = error {
+                conversationReadState.awaitingReply[previewKey] = nil
+                persistReadState()
+                sessionActivities[previewKey] = nil
+                if isSelectedUpdateUnfinished {
+                    failCompanionUpdate(text)
+                    errorMessage = nil
+                } else { errorMessage = text }
+                return true
+            }
+            if isSelectedUpdateUnfinished {
+                updateProgress?.status = "unconfirmed"
+                saveUpdateProgress()
+                errorMessage = nil
+            }
             // Never automatically resubmit an uncertain turn: it may already be executing tools.
-            if let transcript = try? await connection.messages(profile: profile.id, sessionID: session.id),
-               !transcript.isEmpty, attempt == generation, client === connection {
-                messages = transcript
+            if let page = try? await connection.visibleMessagePage(profile: profile.id, sessionID: session.id),
+               !page.messages.isEmpty, attempt == generation, client === connection {
+                mergeRecentMessages(page)
             }
             guard attempt == generation, client === connection else { return true }
-            errorMessage = "\(error.localizedDescription) Check the session before sending again; Hermes may have received your message."
+            if !isSelectedUpdateUnfinished {
+                errorMessage = "\(error.localizedDescription) Check the session before sending again; Hermes may have received your message."
+            }
             return true
         }
     }
@@ -1579,12 +1912,16 @@ final class AppStore {
         // Compression may replace the persisted session ID. Follow Hermes' new session rather
         // than reloading the stale history or executing the next command in the old session.
         let currentID = client.storedSessionID ?? session.id
+        if var bot = profiles.first(where: { $0.id == profile.id })?.botSession, bot.id == session.id {
+            bot.id = currentID
+            cacheBotSession(bot, profile: profile.id)
+        }
         if history {
             do {
-                let transcript = try await client.messages(profile: profile.id, sessionID: currentID)
+                let page = try await client.visibleMessagePage(profile: profile.id, sessionID: currentID)
                 guard attempt == generation else { return }
-                messages = transcript
-                cacheConversation(transcript, profile: profile.id, sessionID: currentID)
+                setLatestPage(page)
+                cacheConversation(messages, profile: profile.id, sessionID: currentID)
             } catch {
                 guard attempt == generation else { return }
                 errorMessage = "The conversation couldn't be refreshed. \(error.localizedDescription)"
@@ -1647,7 +1984,7 @@ final class AppStore {
             if pendingClarification?.id == requestID { pendingClarification = nil }
         case let .approvalExpired(requestID):
             if pendingApproval?.id == requestID { pendingApproval = nil }
-        case .failure(let text): if !wasBackgrounded { errorMessage = text }
+        case .failure(let text): if !wasBackgrounded && !isSelectedUpdateUnfinished { errorMessage = text }
         }
     }
 
@@ -1686,8 +2023,11 @@ final class AppStore {
     }
 
     func backToBots() {
+        botOpenID = nil
+        openingBotProfileID = nil
         guard !isSending, !isRunningCommand else { return }
         generation += 1
+        conversationSwitchID = nil
         notificationDestination = nil
         selectedProfile = nil
         selectedSession = nil
@@ -1702,6 +2042,7 @@ final class AppStore {
     func backToSessions() {
         guard !isSending, !isRunningCommand else { return }
         generation += 1
+        conversationSwitchID = nil
         notificationDestination = nil
         selectedSession = nil
         messages = []
@@ -1716,6 +2057,9 @@ final class AppStore {
         sessionActivities = [:]; sentPreviews = [:]
         connectionAttemptID = UUID()
         generation += 1
+        botOpenID = nil
+        openingBotProfileID = nil
+        conversationSwitchID = nil
         presenceTask?.cancel(); presenceTask = nil
         client.disconnect()
         if let settings {
@@ -1795,10 +2139,27 @@ extension AppStore {
         sessionRefresh = ContentRefreshStatus(phase: .idle, updatedAt: now)
         persistContent()
     }
+    private func cacheBotSession(_ session: HermesSession, profile: String) {
+        if let index = profiles.firstIndex(where: { $0.id == profile }) { profiles[index].botSession = session }
+        if selectedProfile?.id == profile { selectedProfile?.botSession = session }
+        if let index = cachedContent.profiles?.value.firstIndex(where: { $0.id == profile }) {
+            cachedContent.profiles?.value[index].botSession = session
+        }
+    }
     private func cacheConversation(_ rows: [ChatMessage], profile: String, sessionID: String) {
+        if var bot = profiles.first(where: { $0.id == profile })?.botSession, bot.id == sessionID,
+           let latest = rows.last(where: { ["user", "assistant"].contains($0.role) && !$0.text.isEmpty }) {
+            bot.preview = latest.text
+            cacheBotSession(bot, profile: profile)
+        }
         if appIsActive && visibleSessionID == sessionID && selectedProfile?.id == profile {
-            markSessionRead(sessionID, profile: profile)
             let key = FollowedConversation(profile: profile, sessionID: sessionID)
+            if !conversationReadState.unread.contains(key), let latestID = rows.last?.id {
+                if conversationReadState.lastReadMessageIDs[key] != latestID {
+                    conversationReadState.lastReadMessageIDs[key] = latestID
+                    persistReadState()
+                }
+            }
             if let previous = conversationReadState.awaitingReply[key] {
                 let latest = assistantMarker(rows)
                 if !latest.isEmpty && latest != previous {

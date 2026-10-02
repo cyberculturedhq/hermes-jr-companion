@@ -1,5 +1,17 @@
 # Local companion verification
 
+## Bot Chat replies
+
+`Validation/run-checks.sh` verifies replies to an existing Bot Chat owner, lost acknowledgements, failed turns, queued cancellation, attachments, old companion detection and an unowned canonical conversation. The tests do not call a model.
+
+`Validation/prepare-notification-ui.py --bot-home` creates an isolated UI test project. The project has ten tests. They check the bottom Profiles/Bots tabs, Search, and the saved tab choice. They also check Close and Back without a header search field. The session search field stays at the bottom before and after Close and Back.
+
+The conversation checks cover navigation, loading in the detail title, and cancellation during navigation. The tests also check canonical previews and replies without the session-transfer alert. Run the tests with `Validation/fixture_server.py` on the iPhone simulator.
+
+The public companion's `tools/compatibility/bot_replies.py` checks the real Hermes database, writer registry and mailbox with temporary state. The compatibility workflow runs it across the supported Hermes versions. Older versions report bot replies as unavailable.
+
+## Encrypted connection
+
 Run from the project root after installing the companion's Python dependencies
 and `npm ci` in `RelayService`:
 

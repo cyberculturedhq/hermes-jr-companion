@@ -1,8 +1,19 @@
 import SwiftUI
 
 struct BotListView: View {
+    @Binding var path: [AppRoute]
+
+    private enum HomeMode: String {
+        case profiles = "Profiles", bots = "Bots"
+    }
+
+    private enum HomeTab: Hashable { case profiles, bots, search }
+
     @Environment(AppStore.self) private var store
+    @AppStorage("hermes.home.mode.v1") private var mode: HomeMode = .profiles
     @State private var searchText = ""
+    @State private var isSearching = false
+    @State private var isSearchPresented = false
     @State private var isVisible = false
 
     private var isRestoring: Bool { store.phase == .restoring }
@@ -10,15 +21,100 @@ struct BotListView: View {
     private var profiles: [BotProfile] {
         return store.profiles.filter {
             searchText.isEmpty || $0.name.localizedCaseInsensitiveContains(searchText)
-                || $0.summary.localizedCaseInsensitiveContains(searchText)
+                || rowPreview($0).localizedCaseInsensitiveContains(searchText)
         }
     }
 
     var body: some View {
+        TabView(selection: selectedTab) {
+            Tab("Profiles", systemImage: "person.crop.rectangle.stack.fill", value: HomeTab.profiles) {
+                homeNavigation(for: .profiles)
+            }
+            Tab("Bots", systemImage: "bubble.left.and.bubble.right.fill", value: HomeTab.bots) {
+                homeNavigation(for: .bots)
+            }
+            Tab("Search", systemImage: "magnifyingglass", value: HomeTab.search, role: .search) {
+                homeNavigation(for: .search)
+                    .searchable(text: $searchText, isPresented: $isSearchPresented, prompt: "Search \(mode.rawValue)")
+            }
+        }
+        .modifier(HomeSearchActivation())
+        .toolbar(path.isEmpty ? .visible : .hidden, for: .tabBar)
+        .onAppear { isVisible = true }
+        .onDisappear { isVisible = false }
+        .onChange(of: isSearching) { _, searching in
+            if !searching { searchText = "" }
+        }
+        .onChange(of: isSearchPresented) { _, presented in
+            // Closing Search returns to the list. Navigation keeps its route.
+            if !presented && path.isEmpty { isSearching = false }
+        }
+        .onChange(of: path) { _, newPath in
+            // Back to the home screen returns to the list with Search closed.
+            isSearchPresented = false
+            if newPath.isEmpty { isSearching = false }
+        }
+        .alert("Couldn’t Load Profiles", isPresented: Binding(
+            get: { isVisible && store.errorMessage != nil && store.selectedProfile == nil },
+            set: { if !$0 { store.errorMessage = nil } }
+        )) {
+            Button("Try Again") { Task { await store.refreshProfiles() } }
+            Button("OK", role: .cancel) { store.errorMessage = nil }
+        } message: { Text(store.errorMessage ?? "") }
+    }
+
+    private func homeNavigation(for tab: HomeTab) -> some View {
+        // Only the visible tab owns the route. An inactive tab must not open
+        // another copy of a conversation after a notification or a reply.
+        let navigationPath = Binding<[AppRoute]>(
+            get: { selectedTab.wrappedValue == tab ? path : [] },
+            set: { if selectedTab.wrappedValue == tab { path = $0 } }
+        )
+        return NavigationStack(path: navigationPath) {
+            homeList
+                .modifier(ContentStatusSubtitle(status: store.profileRefresh))
+                .navigationTitle(mode.rawValue)
+                .navigationDestination(for: AppRoute.self) { route in
+                    HomeRouteDestination(route: route)
+                }
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        if store.profileRefresh.phase == .failed || store.profileRefresh.phase == .unavailable {
+                            Button("Retry", systemImage: "arrow.clockwise") { Task { await store.retryContentConnection() } }
+                        }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Settings", systemImage: "gearshape") { store.showingSettings = true }
+                            .accessibilityLabel("Settings")
+                            .disabled(isRestoring || store.openingBotProfileID != nil)
+                    }
+                }
+        }
+        .toolbar(path.isEmpty ? .visible : .hidden, for: .tabBar)
+    }
+
+    private var selectedTab: Binding<HomeTab> {
+        Binding(
+            get: { isSearching ? .search : mode == .profiles ? .profiles : .bots },
+            set: { tab in
+                guard store.openingBotProfileID == nil else { return }
+                switch tab {
+                case .search: isSearching = true
+                case .profiles, .bots:
+                    mode = tab == .profiles ? .profiles : .bots
+                    isSearchPresented = false
+                    isSearching = false
+                    searchText = ""
+                }
+            }
+        )
+    }
+
+    private var homeList: some View {
         List {
             if #unavailable(iOS 26.0) {
-            ContentStatusHeader(status: store.profileRefresh) { Task { await store.retryContentConnection() } }
-                .listRowSeparator(.hidden)
+                ContentStatusHeader(status: store.profileRefresh) { Task { await store.retryContentConnection() } }
+                    .listRowSeparator(.hidden)
             }
             
             if !isRestoring, let notice = store.visibleCompanionUpdate {
@@ -26,60 +122,68 @@ struct BotListView: View {
             }
             if !isRestoring, store.updateProgress != nil { CompanionUpdateProgressRow() }
             ForEach(profiles) { profile in
-                NavigationLink(value: AppRoute.profile(profile.id)) {
-                    HStack(spacing: 12) {
-                        ProfileAvatar(profile: profile, address: store.settings?.address ?? "", size: 48)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(profile.name).font(.headline)
-                            Text(profile.summary.isEmpty ? profile.model : profile.summary)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
+                if mode == .profiles {
+                    NavigationLink(value: AppRoute.profile(profile.id)) {
+                        profileRow(profile)
                     }
-                    .padding(.vertical, 4)
+                    .accessibilityIdentifier("profile.\(profile.id)")
+                    .disabled(store.openingBotProfileID != nil
+                              || (store.isRunningCommand && store.selectedProfile?.id != profile.id))
+                } else {
+                    NavigationLink(value: AppRoute.bot(profile.id)) {
+                        profileRow(profile)
+                    }
+                    .foregroundStyle(.primary)
+                    .accessibilityIdentifier("bot.\(profile.id)")
+                    .accessibilityHint("Open the existing Bot Chat for \(profile.name)")
+                    .disabled(store.phase != .connected || store.openingBotProfileID != nil
+                              || store.isRunningCommand || store.isLoadingMessages || store.startingCompanionUpdate)
                 }
-                .accessibilityIdentifier("bot.\(profile.id)")
-                .disabled(store.isRunningCommand && store.selectedProfile?.id != profile.id)
             }
         }
         .listStyle(.plain)
-        .modifier(ContentStatusSubtitle(status: store.profileRefresh))
-        .navigationTitle("Bots")
-        .searchable(text: $searchText, prompt: "Search")
         .overlay {
             if store.profileRefresh.phase == .idle && profiles.isEmpty {
                 ContentUnavailableView(
-                    searchText.isEmpty ? "No Bots" : "No Results",
+                    searchText.isEmpty ? "No \(mode.rawValue)" : "No Results",
                     systemImage: searchText.isEmpty ? "person.crop.circle" : "magnifyingglass",
                     description: Text(searchText.isEmpty
                         ? "Create a profile in Hermes, then pull down to refresh."
                         : "Try another name."))
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                if store.profileRefresh.phase == .failed || store.profileRefresh.phase == .unavailable {
-                    Button("Retry", systemImage: "arrow.clockwise") { Task { await store.retryContentConnection() } }
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Settings", systemImage: "gearshape") { store.showingSettings = true }
-                    .accessibilityLabel("Settings")
-                    .disabled(isRestoring)
-            }
-        }
         .refreshable {
             await store.retryContentConnection()
         }
-        .onAppear { isVisible = true }
-        .onDisappear { isVisible = false }
-        .alert("Couldn’t Load Bots", isPresented: Binding(
-            get: { isVisible && store.errorMessage != nil && store.selectedProfile == nil },
-            set: { if !$0 { store.errorMessage = nil } }
-        )) {
-            Button("Try Again") { Task { await store.refreshProfiles() } }
-            Button("OK", role: .cancel) { store.errorMessage = nil }
-        } message: { Text(store.errorMessage ?? "") }
+    }
+
+    private func rowPreview(_ profile: BotProfile) -> String {
+        if mode == .bots {
+            let preview = profile.botSession?.preview ?? ""
+            return preview.isEmpty ? "No messages" : preview
+        }
+        return profile.summary.isEmpty ? profile.model : profile.summary
+    }
+
+    private func profileRow(_ profile: BotProfile) -> some View {
+        HStack(spacing: 12) {
+            ProfileAvatar(profile: profile, address: store.settings?.address ?? "", size: 48)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(profile.name).font(.headline)
+                Text(rowPreview(profile))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct HomeSearchActivation: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.tabViewSearchActivation(.searchTabSelection)
+        } else { content }
     }
 }
 
@@ -224,21 +328,32 @@ private struct CompanionUpdateRow: View {
                     Section {
                         Text("Companion \(notice.version) is available")
                             .font(.headline)
-                        Text("Start a new conversation with your default Hermes profile to install this update. This uses your normal model allowance.")
+                        Text(store.updateProgress?.status == "failed"
+                             ? "Try the update again in its existing Hermes conversation. This uses your normal model allowance."
+                             : "Start a new conversation with your default Hermes profile to install this update. This uses your normal model allowance.")
                         Text("The connection may briefly drop while updating. Existing Hermes sessions may need a restart afterward.")
                             .font(.footnote).foregroundStyle(.secondary)
-                        Button("Update with Hermes", systemImage: "sparkles") {
+                        Button(store.updateProgress?.status == "failed" ? "Try again" : "Update with Hermes", systemImage: "sparkles") {
                             showingDetails = false
-                            Task { await store.startCompanionUpdate(notice) }
+                            Task {
+                                if store.updateProgress?.status == "failed" { await store.retryCompanionUpdate() }
+                                else { await store.startCompanionUpdate(notice) }
+                            }
                         }
-                        .disabled(!store.canStartCompanionUpdate)
+                        .disabled(store.updateProgress?.status == "failed" ? !store.canRetryCompanionUpdate : !store.canStartCompanionUpdate)
                         .accessibilityIdentifier("companion.update-with-hermes")
                         Text(store.notificationsEnabled
                              ? "We’ll send a notification after the installer verifies completion."
                              : "Enable notifications in Settings to receive an update completion notification.")
                             .font(.footnote).foregroundStyle(.secondary)
                         if store.updateProgress?.pending == true {
-                            Text("An update is already requested. Open its conversation to continue.").font(.footnote)
+                            Button("Open update conversation") {
+                                showingDetails = false
+                                Task { await store.openUpdateConversation() }
+                            }
+                            .disabled(store.isSending || store.phase != .connected)
+                        } else if let progress = store.updateProgress, progress.status == "failed" {
+                            Text(progress.message).font(.footnote)
                         }
                         if !store.profiles.contains(where: { $0.id == "default" }) {
                             Text("The default Hermes profile is unavailable. You can copy the prompt instead.").font(.footnote)
@@ -256,7 +371,7 @@ private struct CompanionUpdateRow: View {
                             store.dismissCompanionUpdate()
                             showingDetails = false
                         }
-                    } footer: { Text("Not now hides this version’s notice from the Bots list. You can still find it in Connection settings.") }
+                    } footer: { Text("Not now hides this version’s notice from the home screen. You can still find it in Settings.") }
                 }
                 .navigationTitle("Companion Update")
                 .navigationBarTitleDisplayMode(.inline)
@@ -271,8 +386,8 @@ private struct CompanionUpdateProgressRow: View {
     var body: some View {
         if let progress = store.updateProgress {
             VStack(alignment: .leading, spacing: 8) {
-                Label(progress.status == "completed" ? "Companion update installed" : progress.status == "failed" ? "Companion update needs attention" : "Updating with Hermes",
-                      systemImage: progress.status == "completed" ? "checkmark.circle" : "arrow.triangle.2.circlepath")
+                Label(progress.status == "completed" ? "Companion update installed" : progress.status == "failed" ? "Companion update failed" : progress.status == "unconfirmed" ? "Check companion update" : "Updating with Hermes",
+                      systemImage: progress.status == "completed" ? "checkmark.circle" : progress.status == "failed" || progress.status == "unconfirmed" ? "exclamationmark.circle" : "arrow.triangle.2.circlepath")
                     .font(.headline)
                 Text(progress.message).font(.footnote).foregroundStyle(.secondary)
                 Button("Open update conversation") { Task { await store.openUpdateConversation() } }
@@ -281,6 +396,11 @@ private struct CompanionUpdateProgressRow: View {
                     Button("Check update status") { Task { await store.refreshCompanionUpdate(force: true) } }
                         .disabled(store.checkingCompanionUpdate || store.phase != .connected)
                 } else {
+                    if progress.status == "failed" {
+                        Button("Try again") { Task { await store.retryCompanionUpdate() } }
+                            .disabled(!store.canRetryCompanionUpdate)
+                            .accessibilityIdentifier("companion.update-retry")
+                    }
                     Button("Dismiss") { store.dismissFinishedUpdate() }
                 }
             }

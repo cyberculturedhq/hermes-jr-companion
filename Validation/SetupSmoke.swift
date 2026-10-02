@@ -76,7 +76,7 @@ struct SetupSmoke {
         precondition(profiles.map(\.id).contains("research"))
         print("PASS: numeric pairing completes the real HPKE connection with the original phone key")
         let messages = try await client.messages(profile: "research", sessionID: "saved-0")
-        precondition(messages.count == 501)
+        precondition(messages.count == 10)
         client.disconnect()
         _ = try await request("POST", path + "/complete", [:])
         print("PASS: encrypted conversation access and setup cleanup")

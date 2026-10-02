@@ -43,13 +43,68 @@ import Foundation
         let bots = try await client.connect(address: base, token: "fixture-dashboard-token")
         precondition(bots.map(\.id) == ["default", "research"])
         precondition(bots[1].name == "Research")
+        precondition(bots[0].botSession == nil)
+        precondition(bots[1].summary == "Research profile")
+        precondition(bots[1].botSession?.id == "bot-tip")
+        precondition(bots[1].botSession?.preview == "Existing continuous bot conversation")
+        print("PASS: bot roster previews use the canonical conversation and keep profile descriptions separate")
         print("PASS: authenticated profile discovery through URL prefix")
+        let botBaseline = try await fixtureRequests(base: base)
+        let bot = try await client.botSession(profile: "research")
+        precondition(bot.id == "bot-tip" && bot.title == "Bot Chat")
+        try await client.openSession(profile: "research", sessionID: bot.id)
+        let botMessages = try await client.messages(profile: "research", sessionID: bot.id)
+        precondition(botMessages.first?.text == "Existing continuous bot conversation")
+        let botCatalog = try await client.commandCatalog()
+        precondition(!botCatalog.commands.contains { ["/new", "/title"].contains($0.text) })
+        for command in ["/new", "/title Renamed"] {
+            do {
+                _ = try await client.executeCommand(command)
+                fatalError("Bot Chat identity control was accepted")
+            } catch HermesCommandError.rejected { }
+        }
+        _ = try await client.executeCommand("/compress")
+        precondition(client.storedSessionID == "bot-next-tip")
+        do {
+            _ = try await client.executeCommand("/new")
+            fatalError("Compression removed the Bot Chat identity guard")
+        } catch HermesCommandError.rejected { }
+        try await setFixtureBot(base: base, mode: "advanced")
+        let advancedBot = try await client.botSession(profile: "research")
+        precondition(advancedBot.id == "bot-next-tip")
+        for mode in ["missing", "unsupported", "malformed", "failure"] {
+            try await setFixtureBot(base: base, mode: mode)
+            do {
+                _ = try await client.botSession(profile: "research")
+                fatalError("Invalid bot lookup was accepted: \(mode)")
+            } catch { }
+        }
+        try await setFixtureBot(base: base, mode: "available")
+        do {
+            _ = try await client.botSession(profile: "default")
+            fatalError("Another profile's bot conversation was opened")
+        } catch { }
+        let botRequests = Array((try await fixtureRequests(base: base)).dropFirst(botBaseline.count))
+        precondition(!botRequests.contains { ["session.create", "prompt.submit", "session.title"].contains($0["method"] as? String ?? "") })
+        precondition(botRequests.filter { $0["method"] as? String == "session.resume" }.count == 1)
+        print("PASS: hidden Bot Chat lookup, compression tip refresh, profile isolation, and lookup failures without creation")
+        try await checkBotReplies(client: client, base: base)
         let sessions = try await client.sessions(profile: "research")
         precondition(sessions.count == 101 && sessions.first?.id == "saved-0")
         print("PASS: profile isolation and session pagination")
         let messages = try await client.messages(profile: "research", sessionID: "saved-0")
-        precondition(messages.count == 501 && messages.last?.text == "Message 500")
-        print("PASS: complete paginated history")
+        precondition(messages.count == 10 && messages.first?.text == "Message 491" && messages.last?.text == "Message 500")
+        let older = try await client.messagePage(profile: "research", sessionID: "saved-0", offset: 10, limit: 30)
+        precondition(older.messages.count == 30 && older.messages.first?.text == "Message 461" && older.messages.last?.text == "Message 490" && older.hasOlder)
+        let short = try await client.visibleMessagePage(profile: "research", sessionID: "saved-short")
+        precondition(short.messages.map(\.text) == ["Message 0", "Message 11"] && !short.hasOlder && short.returned == 12)
+        let exact = try await client.visibleMessagePage(profile: "research", sessionID: "saved-exact")
+        precondition(exact.messages.count == 10 && !exact.hasOlder && exact.returned == 10)
+        let sparse = try await client.visibleMessagePage(profile: "research", sessionID: "saved-sparse")
+        precondition(sparse.messages.map(\.text) == ["Message 0", "Message 1"] && !sparse.hasOlder && sparse.returned == 1202)
+        let trailing = try await client.visibleMessagePage(profile: "research", sessionID: "saved-trailing")
+        precondition(trailing.messages.map(\.text) == ["Message 40", "Message 41"] && !trailing.hasOlder && trailing.returned == 42)
+        print("PASS: newest ten messages and older history page")
         let draftClient = HermesClient()
         _ = try await draftClient.connect(address: base, token: "fixture-dashboard-token")
         let emptyDraft = try await draftClient.createSession(profile: "research")
@@ -69,13 +124,13 @@ import Foundation
         precondition(rejectedHistory.isEmpty)
         try await draftClient.send(text: "hello") { _ in }
         let savedHistory = try await draftClient.messages(profile: "research", sessionID: emptyDraft.id)
-        precondition(savedHistory.count == 501)
+        precondition(savedHistory.count == 10)
         print("PASS: rejected submission retains draft; first sent message enables saved history")
         _ = try await draftClient.createSession(profile: "research")
         draftClient.disconnect()
         _ = try await draftClient.connect(address: base, token: "fixture-dashboard-token")
         let relaunchedHistory = try await draftClient.messages(profile: "research", sessionID: emptyDraft.id)
-        precondition(relaunchedHistory.count == 501)
+        precondition(relaunchedHistory.count == 10)
         draftClient.disconnect()
         print("PASS: disconnect discards draft bookkeeping rather than hiding server history")
         let created = try await client.createSession(profile: "research")
@@ -102,7 +157,7 @@ import Foundation
         precondition(aliasChoices.first?.description == "Show token usage for this session")
         let newChoice = try await client.completeCommand("/new")
         precondition(newChoice.first?.display == "/new")
-        precondition(newChoice.first?.description == "Start a new session with this bot")
+        precondition(newChoice.first?.description == "Start a new session with this profile")
         let saveChoice = try await client.completeCommand("/save")
         precondition(saveChoice.first?.display == "/save")
         precondition(saveChoice.first?.description == "Export this conversation as JSON on your Hermes host")
@@ -383,6 +438,96 @@ import Foundation
         request.setValue("Bearer fixture-dashboard-token", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["home": home as Any? ?? NSNull()])
+        let (_, response) = try await URLSession.shared.data(for: request)
+        precondition((response as? HTTPURLResponse)?.statusCode == 200)
+    }
+
+    @MainActor private static func checkBotReplies(client: HermesClient, base: String) async throws {
+        let enrollment = CompanionEnrollment(deviceID: "11111111-1111-4111-8111-111111111111",
+            deviceToken: "fixture-device-token", installationID: "fixture-installation")
+        try await client.openSession(profile: "research", sessionID: "bot-tip")
+        let baseline = try await fixtureRequests(base: base)
+        for mode in ["owner", "lost_ack"] {
+            try await setFixtureBot(base: base, mode: "available", deliveryMode: mode)
+            var accepted = false
+            var reply = ""
+            try await client.send(text: "Testing", enrollment: enrollment) { event in
+                if case .accepted = event { accepted = true }
+                if case .finalText(let text) = event { reply = text }
+            }
+            precondition(accepted && reply == "Bot replied to Testing")
+        }
+        let ownerRequests = Array((try await fixtureRequests(base: base)).dropFirst(baseline.count))
+        precondition(ownerRequests.filter { $0["method"] as? String == "bot.reply.put" }.count == 2)
+        precondition(!ownerRequests.contains { ["prompt.submit", "session.create", "session.interrupt"].contains($0["method"] as? String ?? "") })
+        print("PASS: bot replies use the current owner; a lost acknowledgement reads the receipt without resubmitting")
+
+        for mode in ["owner_failed", "owner_lost"] {
+            try await setFixtureBot(base: base, mode: "available", deliveryMode: mode)
+            do {
+                try await client.send(text: "Testing", enrollment: enrollment) { _ in }
+                fatalError("Expected bot owner failure")
+            } catch HermesSendError.turnFailed where mode == "owner_failed" { }
+            catch HermesSendError.outcomeUnknown where mode == "owner_lost" { }
+        }
+        print("PASS: bot owner failure and uncertain outcomes never start another session")
+
+        try await setFixtureBot(base: base, mode: "available", deliveryMode: "queued_forever")
+        var queued = false
+        let waiting = Task { @MainActor in
+            do {
+                try await client.send(text: "Cancel this", enrollment: enrollment) { event in
+                    if case .accepted = event { queued = true }
+                }
+                fatalError("Expected cancelled bot reply")
+            } catch HermesSendError.notSubmitted { }
+        }
+        for _ in 0..<100 where !queued { try await Task.sleep(for: .milliseconds(20)) }
+        precondition(queued)
+        try await client.stop()
+        try await waiting.value
+        print("PASS: Stop cancels a queued bot reply without interrupting its owner")
+
+        try await setFixtureBot(base: base, mode: "available")
+        let photo = DraftPhoto(data: Data([137, 80, 78, 71]), filename: "bot-photo.png")
+        try await client.send(text: "Read this", photos: [photo], enrollment: enrollment) { _ in }
+        precondition(client.lastSentPhotoPaths == ["/fixture/uploads/bot-photo.png"])
+        let photoRequests = try await fixtureRequests(base: base)
+        let photoRequest = photoRequests.last { $0["method"] as? String == "bot.reply.put" }
+        let references = (photoRequest?["params"] as? [String: Any])?["attachments"] as? [[String: String]]
+        precondition(references?.first?["filename"] == "bot-photo.png")
+        print("PASS: bot attachments upload to the companion and use owned file references")
+
+        try await setFixtureBot(base: base, mode: "available", deliveryMode: "missing_capabilities")
+        let oldBaseline = try await fixtureRequests(base: base)
+        do {
+            try await client.send(text: "Testing", enrollment: enrollment) { _ in }
+            fatalError("Expected companion update requirement")
+        } catch HermesSendError.notSubmitted(let text) { precondition(text.contains("Update the companion")) }
+        let oldRequests = try await fixtureRequests(base: base)
+        precondition(oldRequests.count == oldBaseline.count)
+        print("PASS: old companions require an update before bot reply submission")
+
+        try await setFixtureBot(base: base, mode: "available", deliveryMode: "session")
+        let unownedBaseline = try await fixtureRequests(base: base)
+        var reply = ""
+        try await client.send(text: "Testing", enrollment: enrollment) { event in
+            if case .finalText(let text) = event { reply = text }
+        }
+        precondition(reply == "Hello Hermes" && client.storedSessionID == "bot-tip")
+        let unownedRequests = Array((try await fixtureRequests(base: base)).dropFirst(unownedBaseline.count))
+        precondition(unownedRequests.filter { $0["method"] as? String == "prompt.submit" }.count == 1)
+        precondition(!unownedRequests.contains { $0["method"] as? String == "session.create" })
+        print("PASS: an unowned bot continues its existing canonical conversation")
+        try await setFixtureBot(base: base, mode: "available")
+    }
+
+    private static func setFixtureBot(base: String, mode: String, deliveryMode: String = "owner") async throws {
+        var request = URLRequest(url: URL(string: base + "/api/fixture/bot")!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer fixture-dashboard-token", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["mode": mode, "delivery_mode": deliveryMode])
         let (_, response) = try await URLSession.shared.data(for: request)
         precondition((response as? HTTPURLResponse)?.statusCode == 200)
     }

@@ -90,7 +90,7 @@ final class ContentCacheUI: XCTestCase {
             let app = XCUIApplication(); app.launchArguments = [mode]; app.launch()
             let content: XCUIElement
             switch mode {
-            case "cache-profiles": content = app.buttons["bot.research"]
+            case "cache-profiles": content = app.buttons["profile.research"]
             case "cache-sessions": content = app.buttons["session.saved"]
             default: content = app.textFields["chat.composer"]
             }

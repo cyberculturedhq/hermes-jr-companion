@@ -56,6 +56,10 @@ struct CompanionUpdateReceipt: Codable, Equatable {
     let notify: Bool
     let created: Double
 
+    var displayText: String {
+        "Update my Hermes Jr. companion to version " + target + (notify ? " and notify me when the verified update is complete." : ".")
+    }
+
     var body: [String: Any] { get throws {
         try JSONSerialization.jsonObject(with: JSONEncoder().encode(self)) as! [String: Any]
     } }
@@ -84,7 +88,8 @@ struct CompanionUpdateProgress: Codable, Equatable {
     var message: String {
         switch status {
         case "completed": "Companion \(installed ?? receipt.target) installed. Restart Hermes on your computer when its current work is finished to finish applying the update."
-        case "failed": error ?? "The update did not complete. Open its conversation for details."
+        case "failed": error ?? "The update did not complete. Try again or open its conversation for details."
+        case "unconfirmed": "The connection was interrupted. Check update status before trying again; the installer may still be running."
         default: "Update requested. You can leave the app; we’ll verify the result when Hermes reconnects."
         }
     }

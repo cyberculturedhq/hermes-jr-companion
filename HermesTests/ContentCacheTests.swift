@@ -3,6 +3,57 @@ import XCTest
 
 @MainActor
 final class ContentCacheTests: XCTestCase {
+    func testExistingProfileCacheStillDecodesWithoutBotMetadata() throws {
+        let data = Data(#"{"id":"research","displayName":"Research","summary":"Profile description","model":"test","isGatewayRunning":true}"#.utf8)
+        let profile = try JSONDecoder().decode(BotProfile.self, from: data)
+        XCTAssertEqual(profile.summary, "Profile description")
+        XCTAssertNil(profile.botSession)
+    }
+
+    func testTranscriptWindowMovesThroughLoadedHistoryWithoutRenderingEveryRow() {
+        let store = AppStore()
+        store.messages = (0..<230).map { ChatMessage(id: "\($0)", role: "assistant", text: "Message \($0)") }
+        XCTAssertEqual(store.visibleWindowMessages.count, 40)
+        XCTAssertEqual(store.visibleWindowMessages.first?.id, "0")
+        XCTAssertEqual(store.visibleWindowMessages.last?.id, "39")
+        XCTAssertTrue(store.hasNewerLoadedMessages)
+        XCTAssertEqual(store.showNewerLoadedMessages(), "39")
+        XCTAssertEqual(store.visibleWindowMessages.first?.id, "30")
+        XCTAssertEqual(store.visibleWindowMessages.last?.id, "69")
+        XCTAssertTrue(store.hasNewerLoadedMessages)
+        XCTAssertEqual(store.showNewerLoadedMessages(), "69")
+        XCTAssertEqual(store.visibleWindowMessages.first?.id, "60")
+        XCTAssertEqual(store.showEarlierLoadedMessages(), "60")
+        XCTAssertEqual(store.visibleWindowMessages.first?.id, "30")
+        XCTAssertEqual(store.showEarlierLoadedMessages(), "30")
+        XCTAssertEqual(store.visibleWindowMessages.first?.id, "0")
+    }
+
+    func testUnreadBoundarySurvivesRelaunchUntilEarlierMessagesAreSeen() {
+        let address = "https://unread-boundary-\(UUID().uuidString).example"
+        defer { UserDefaults.standard.removeObject(forKey: "notifications/" + address + "/conversation-read-state.v1") }
+        let profile = BotProfile(id: "research", displayName: "Research", summary: "", model: "", isGatewayRunning: true)
+        let session = HermesSession(id: "saved", title: "Saved", preview: "", lastActive: .now, messageCount: 1, source: "cli")
+        let store = AppStore()
+        store.settings = ConnectionSettings(address: address)
+        store.selectedProfile = profile
+        store.selectedSession = session
+        store.messages = [ChatMessage(id: "last-seen", role: "assistant", text: "Seen")]
+        store.markSessionRead(session.id, profile: profile.id)
+        store.noteAssistantReply(profile: profile.id, sessionID: session.id)
+        XCTAssertEqual(store.unreadBoundary(profile: profile.id, sessionID: session.id), "last-seen")
+
+        let reopened = AppStore()
+        reopened.settings = ConnectionSettings(address: address)
+        XCTAssertTrue(reopened.isSessionUnread(session.id, profile: profile.id))
+        XCTAssertEqual(reopened.unreadBoundary(profile: profile.id, sessionID: session.id), "last-seen")
+        reopened.selectedProfile = profile
+        reopened.selectedSession = session
+        reopened.messages = [ChatMessage(id: "new-reply", role: "assistant", text: "New")]
+        reopened.markSessionRead(session.id, profile: profile.id)
+        XCTAssertFalse(reopened.isSessionUnread(session.id, profile: profile.id))
+    }
+
     func testUnreadRepliesRespectVisibilityPersistAndStayScoped() {
         let address = "https://unread-\(UUID().uuidString).example"
         defer { UserDefaults.standard.removeObject(forKey: "notifications/" + address + "/conversation-read-state.v1") }

@@ -63,6 +63,7 @@ final class HermesClient {
     private var runtimeSessionID: String?
     private var remoteTurnRunning = false
     var isRemoteTurnRunning: Bool { remoteTurnRunning }
+    private(set) var lastTurnFailure: String?
     private var isPreparingSend = false
     private var preparationCancelled = false
     private var uncertainAttachmentSessions = Set<String>()
@@ -71,12 +72,22 @@ final class HermesClient {
     // Only drafts created by this client are exempt from persisted-history reads.
     // Never infer draft status from title or message count on server-listed sessions.
     private var draftSessions: [String: [String: String]] = [:]
+    private var botSessionIDs: [String: Set<String>] = [:]
     private var selectedProfile: String?
+    var isBotConversation: Bool {
+        guard let profile = selectedProfile, let id = storedSessionID else { return false }
+        return botSessionIDs[profile]?.contains(id) == true
+    }
     private var verifiedGatewayProfile: String?
     private var avatarCache: [String: String] = [:]
     private var clarifications: [ClarificationRequest] = []
     private var cachedCommandCatalog: (sessionID: String, catalog: HermesCommandCatalog)?
     private var isExecutingCommand = false
+    private struct BotReply {
+        let id: String
+        let enrollment: CompanionEnrollment?
+    }
+    private var activeBotReply: BotReply?
     private var cachedModelOptions: (sessionID: String, result: [String: Any])?
     private(set) var lastCommandNeedsHistoryRefresh = false
     private(set) var lastCommandNeedsSessionRefresh = false
@@ -172,8 +183,10 @@ final class HermesClient {
             throw HermesError.message("Hermes returned an unsupported profile list.")
         }
         var avatars = avatarCache
-        // The RPC profile surface adds asset flags, while REST has gateway status.
-        if let extras = try? await rpc("profiles.list", ["include_sessions": false]),
+        var botSessions: [String: HermesSession] = [:]
+        // The RPC surface provides canonical bot previews and asset flags.
+        // REST provides gateway status and ordinary profile descriptions.
+        if let extras = try? await rpc("profiles.list", ["include_sessions": true]),
            let richProfiles = extras["profiles"] as? [[String: Any]] {
             // The launch profile need not be named "default" on a hosted installation.
             // Compare identities from the same gateway before enabling unscoped extension APIs.
@@ -181,6 +194,15 @@ final class HermesClient {
                let home = identity["home"] as? String, !home.isEmpty {
                 verifiedGatewayProfile = richProfiles.first(where: { $0["path"] as? String == home })?["name"] as? String
             } else { verifiedGatewayProfile = nil }
+            for row in richProfiles {
+                if let name = row["name"] as? String,
+                   let canonical = row["canonical_session"] as? [String: Any],
+                   let session = Self.decodeBotSession(canonical) {
+                    botSessions[name] = session
+                    botSessionIDs[name, default: []].insert(session.id)
+                    if let rootID = canonical["id"] as? String { botSessionIDs[name, default: []].insert(rootID) }
+                }
+            }
             for row in richProfiles where row["has_avatar"] as? Bool == true {
                 guard let name = row["name"] as? String, avatars[name] == nil else { continue }
                 if let asset = try? await rpc("profiles.get_asset", ["name": name, "asset": "avatar"]),
@@ -196,8 +218,43 @@ final class HermesClient {
             return BotProfile(id: name, displayName: row["display_name"] as? String ?? "",
                               summary: row["description"] as? String ?? "", model: row["model"] as? String ?? "",
                               isGatewayRunning: row["gateway_running"] as? Bool ?? false,
-                              avatarDataURL: avatars[name])
+                              avatarDataURL: avatars[name], botSession: botSessions[name])
         }
+    }
+
+    func botSession(profile: String) async throws -> HermesSession {
+        try await ensureSocket()
+        // Hermes resolves the exact "Bot Chat" title on the owning profile.
+        // Ordinary session lists omit this hidden conversation. Resolve it again
+        // on each tap so compression or another device cannot leave a stale ID.
+        let response = try await rpc("profiles.list", ["include_sessions": true])
+        guard let rows = response["profiles"] as? [[String: Any]],
+              let row = rows.first(where: { $0["name"] as? String == profile }) else {
+            throw HermesError.message("This profile is unavailable. Refresh the home screen and try again.")
+        }
+        guard row.keys.contains("canonical_session") else {
+            throw HermesError.message("Update Hermes on your computer to open bot conversations.")
+        }
+        guard !(row["canonical_session"] is NSNull) else {
+            throw HermesError.message("No Bot Chat is available for this profile. Open this bot in Hermes, then try again.")
+        }
+        guard let canonical = row["canonical_session"] as? [String: Any],
+              let session = Self.decodeBotSession(canonical) else {
+            throw HermesError.message("Hermes returned an invalid bot conversation. Refresh and try again.")
+        }
+        botSessionIDs[profile, default: []].insert(session.id)
+        if let rootID = canonical["id"] as? String { botSessionIDs[profile, default: []].insert(rootID) }
+        return session
+    }
+
+    static func decodeBotSession(_ row: [String: Any]) -> HermesSession? {
+        // The root owns the exact title. Its compression tip can have another title.
+        let title = row["root_title"] as? String ?? row["title"] as? String
+        guard title == "Bot Chat", let rootID = row["id"] as? String, !rootID.isEmpty else { return nil }
+        var resolved = row
+        if let tipID = row["resolved_id"] as? String, !tipID.isEmpty { resolved["id"] = tipID }
+        resolved["title"] = "Bot Chat"
+        return decodeSession(resolved)
     }
 
     func sessions(profile: String, onPage: (@MainActor ([HermesSession]) -> Void)? = nil) async throws -> [HermesSession] {
@@ -239,28 +296,72 @@ final class HermesClient {
 
     func isDraft(profile: String, sessionID: String) -> Bool { draftSessions[profile]?[sessionID] != nil }
 
-    func messages(profile: String, sessionID: String) async throws -> [ChatMessage] {
-        if draftSessions[profile]?[sessionID] != nil { return [] }
-        var results: [ChatMessage] = []
-        var seen = Set<String>()
-        for page in 0..<200 {
-            try Task.checkCancellation()
-            let response = try await json("api/sessions/\(Self.pathComponent(sessionID))/messages", query: ["profile": profile, "limit": "500", "offset": String(page * 500), "order": "oldest"])
-            guard let rows = response["messages"] as? [[String: Any]] else {
-                throw HermesError.message("Hermes returned an unsupported message history.")
-            }
-            for (index, row) in rows.enumerated() {
-                let role = row["role"] as? String ?? ""
-                guard ["user", "assistant"].contains(role), row["display_kind"] as? String != "hidden" else { continue }
-                let text = Self.contentText(row["content"])
-                guard !text.isEmpty else { continue }
-                let id = row["id"].map { String(describing: $0) } ?? "\(sessionID)-\(page)-\(index)"
-                if seen.insert(id).inserted { results.append(ChatMessage(id: id, role: role, text: text, timestamp: Self.messageDate(row["timestamp"]), delivery: role == "user" ? .delivered : nil)) }
-            }
-            let pagination = response["pagination"] as? [String: Any]
-            if (pagination?["returned"] as? Int ?? rows.count) < 500 { return results }
+    struct MessagePage {
+        let messages: [ChatMessage] // Always in reading order.
+        let returned: Int          // Raw row count, including rows hidden from the chat.
+        let hasOlder: Bool
+        let offsetsFromNewest: [Int]
+    }
+
+    func messagePage(profile: String, sessionID: String, offset: Int = 0, limit: Int = 10) async throws -> MessagePage {
+        if draftSessions[profile]?[sessionID] != nil { return MessagePage(messages: [], returned: 0, hasOlder: false, offsetsFromNewest: []) }
+        try Task.checkCancellation()
+        let response = try await json("api/sessions/\(Self.pathComponent(sessionID))/messages",
+                                      query: ["profile": profile, "limit": String(limit), "offset": String(offset), "order": "latest"])
+        guard let rows = response["messages"] as? [[String: Any]] else {
+            throw HermesError.message("Hermes returned an unsupported message history.")
         }
-        throw HermesError.message("This conversation is too large to load in full on this device.")
+        let visible = rows.enumerated().compactMap { index, row -> (ChatMessage, Int)? in
+            let role = row["role"] as? String ?? ""
+            guard ["user", "assistant"].contains(role), row["display_kind"] as? String != "hidden" else { return nil }
+            let text = Self.contentText(row["content"])
+            guard !text.isEmpty else { return nil }
+            let id = row["id"].map { String(describing: $0) } ?? "\(sessionID)-\(offset + index)"
+            let message = ChatMessage(id: id, role: role, text: text, timestamp: Self.messageDate(row["timestamp"]),
+                                      delivery: role == "user" ? .delivered : nil)
+            return (message, rows.count - 1 - index)
+        }
+        let pagination = response["pagination"] as? [String: Any]
+        let returned = pagination?["returned"] as? Int ?? rows.count
+        return MessagePage(messages: visible.map { $0.0 }, returned: returned, hasOlder: returned >= limit,
+                           offsetsFromNewest: visible.map { $0.1 })
+    }
+
+    /// The API counts tool and hidden rows toward `limit`. Scan only as far as needed
+    /// to obtain a page of visible chat messages, preserving the raw offset boundary.
+    func visibleMessagePage(profile: String, sessionID: String, offset: Int = 0, visibleLimit: Int = 10) async throws -> MessagePage {
+        var scanned = 0
+        var candidates: [(message: ChatMessage, position: Int)] = []
+        var more = true
+        // Ask for one extra raw row so an exact-size conversation does not
+        // display an "Earlier messages" control with nothing behind it.
+        var rawLimit = max(11, visibleLimit + 1)
+        while more && scanned < 100_000 {
+            let limit = min(rawLimit, 100_000 - scanned)
+            let page = try await messagePage(profile: profile, sessionID: sessionID, offset: offset + scanned, limit: limit)
+            candidates += zip(page.messages, page.offsetsFromNewest).map {
+                (message: $0.0, position: scanned + $0.1)
+            }
+            scanned += page.returned
+            more = page.hasOlder
+            // Keep scanning until we find one extra visible message, so a page
+            // ending in hidden/tool rows does not advertise empty older history.
+            if candidates.count > visibleLimit || page.returned == 0 { break }
+            rawLimit = min(rawLimit * 4, 500)
+        }
+        if candidates.isEmpty && more {
+            throw HermesError.message("This conversation has too many non-chat records to locate its messages.")
+        }
+        let selected = candidates.sorted { $0.position < $1.position }.prefix(visibleLimit)
+        let consumed = candidates.count > visibleLimit ? (selected.last.map { $0.position + 1 } ?? scanned) : scanned
+        let readingOrder = selected.sorted { $0.position > $1.position }
+        return MessagePage(messages: readingOrder.map { $0.message },
+                           returned: consumed, hasOlder: candidates.count > visibleLimit || more,
+                           offsetsFromNewest: readingOrder.map { $0.position })
+    }
+
+    func messages(profile: String, sessionID: String) async throws -> [ChatMessage] {
+        try await visibleMessagePage(profile: profile, sessionID: sessionID).messages
     }
 
     func createSession(profile: String) async throws -> HermesSession {
@@ -274,6 +375,7 @@ final class HermesClient {
         clarifications.removeAll()
         runtimeSessionID = runtimeID
         remoteTurnRunning = false
+        lastTurnFailure = nil
         storedSessionID = storedID
         sessionCoordinates[runtimeID] = (profile, storedID)
         selectedProfile = profile
@@ -284,6 +386,7 @@ final class HermesClient {
     }
 
     func openSession(profile: String, sessionID: String) async throws {
+        lastTurnFailure = nil
         guard turnContinuation == nil, !isExecutingCommand else { throw HermesError.message("Wait for the current action before opening another session.") }
         // A live draft already belongs to this socket. It has no persisted history
         // yet, so reopening it is a local selection rather than a database resume.
@@ -298,6 +401,7 @@ final class HermesClient {
             return
         }
         try await ensureSocket()
+        let resumingBot = botSessionIDs[profile]?.contains(sessionID) == true
         let response = try await rpc("session.resume", ["profile": profile, "session_id": sessionID, "defer_history": true, "omit_messages": true])
         guard let runtimeID = response["session_id"] as? String else {
             throw HermesError.message("Hermes did not return the resumed session identity.")
@@ -305,7 +409,12 @@ final class HermesClient {
         clarifications.removeAll()
         runtimeSessionID = runtimeID
         remoteTurnRunning = response["running"] as? Bool ?? false
+        if !remoteTurnRunning, let inflight = response["inflight"] as? [String: Any],
+           inflight["status"] as? String == "error" {
+            lastTurnFailure = "Hermes could not finish this request. Try again. If it fails again, restart Hermes on your computer when its current work is finished."
+        }
         storedSessionID = response["session_key"] as? String ?? response["resumed"] as? String ?? sessionID
+        if resumingBot, let id = storedSessionID { botSessionIDs[profile, default: []].insert(id) }
         selectedProfile = profile
         sessionCoordinates[runtimeID] = (profile, storedSessionID ?? sessionID)
         if draftSessions[profile]?[sessionID] != nil {
@@ -315,6 +424,157 @@ final class HermesClient {
     }
 
     func send(text: String, photos: [DraftPhoto] = [], enrollment: CompanionEnrollment? = nil, onEvent: @escaping @MainActor (ChatEvent) -> Void) async throws {
+        if isBotConversation {
+            try await sendBotReply(text: text, photos: photos, enrollment: enrollment, onEvent: onEvent)
+        } else {
+            try await sendSession(text: text, photos: photos, enrollment: enrollment, onEvent: onEvent)
+        }
+    }
+
+    private func sendBotReply(text: String, photos: [DraftPhoto], enrollment: CompanionEnrollment?,
+                              onEvent: @escaping @MainActor (ChatEvent) -> Void) async throws {
+        guard turnContinuation == nil, !isPreparingSend, activeBotReply == nil, !isExecutingCommand,
+              let profile = selectedProfile, let sessionID = storedSessionID else {
+            throw HermesSendError.notSubmitted("Wait for the current action before sending another bot reply.")
+        }
+        guard photos.allSatisfy({ !$0.data.isEmpty && $0.data.count <= 25 * 1024 * 1024 }) else {
+            throw HermesSendError.notSubmitted("Each attachment must be nonempty and no larger than 25 MB.")
+        }
+        guard text.count <= 200_000, photos.count <= 20 else {
+            throw HermesSendError.notSubmitted("Send no more than 200,000 characters or 20 attachments in one bot reply.")
+        }
+        let id = UUID().uuidString.lowercased()
+        activeBotReply = BotReply(id: id, enrollment: enrollment)
+        isPreparingSend = true
+        submissionPending = true
+        preparationCancelled = false
+        lastSentPhotoPaths = []
+        defer {
+            if activeBotReply?.id == id {
+                activeBotReply = nil
+                isPreparingSend = false
+                submissionPending = false
+                remoteTurnRunning = false
+            }
+        }
+        var references: [[String: String]] = []
+        do {
+            let capabilities = try await companionAPI("capabilities")
+            guard capabilities["bot_replies"] as? Int == 1 else {
+                let message = capabilities["bot_replies"] == nil
+                    ? "Update the companion on your Hermes computer to send Bot Chat replies."
+                    : "Update Hermes on your computer to receive Bot Chat replies from the iPhone."
+                throw HermesError.message(message)
+            }
+            for photo in photos {
+                onEvent(.activity(photo.isFile == true ? "Uploading file…" : "Sending photo…"))
+                let uploadID = UUID().uuidString.lowercased()
+                var offset = 0
+                while offset < photo.data.count {
+                    try Task.checkCancellation()
+                    guard !preparationCancelled else { throw CancellationError() }
+                    let end = min(offset + 512 * 1024, photo.data.count)
+                    let result = try await companionAPI("uploads", method: "PUT", body: [
+                        "upload_id": uploadID, "filename": photo.filename, "offset": offset, "total": photo.data.count,
+                        "content_base64": photo.data.subdata(in: offset..<end).base64EncodedString()
+                    ], enrollment: enrollment)
+                    guard result["offset"] as? Int == end, end < photo.data.count || result["complete"] as? Bool == true else {
+                        throw HermesError.message("Hermes did not confirm the attachment upload.")
+                    }
+                    offset = end
+                }
+                references.append(["upload_id": uploadID, "filename": photo.filename])
+            }
+            guard !preparationCancelled else { throw CancellationError() }
+        } catch {
+            throw HermesSendError.notSubmitted(error.localizedDescription)
+        }
+        let path = "bot-replies/" + id
+        let body: [String: Any] = ["profile": profile, "session_id": sessionID, "text": text, "attachments": references]
+        var result: [String: Any]
+        do {
+            result = try await companionAPI(path, method: "PUT", body: body, enrollment: enrollment)
+        } catch let submissionError {
+            // Read the durable receipt after a lost acknowledgement. This never submits again.
+            do { result = try await companionAPI(path, enrollment: enrollment) }
+            catch let lookup as HermesHTTPError where lookup.statusCode == 404 {
+                throw HermesSendError.notSubmitted(submissionError.localizedDescription)
+            }
+            catch { throw HermesSendError.outcomeUnknown("The bot reply could not be confirmed. Check the conversation before sending again.") }
+        }
+        guard activeBotReply?.id == id else { throw ConversationSuspended() }
+        if result["route"] as? String == "unavailable" {
+            throw HermesSendError.notSubmitted(result["message"] as? String ?? "This Bot Chat owner cannot receive iPhone replies.")
+        }
+        lastSentPhotoPaths = result["paths"] as? [String] ?? []
+        if preparationCancelled {
+            if result["route"] as? String == "session" { throw HermesSendError.notSubmitted("Bot reply sending was cancelled.") }
+            if result["route"] as? String == "owner" {
+                result = (try? await companionAPI(path, method: "DELETE", enrollment: enrollment)) ?? result
+            }
+        }
+        if result["route"] as? String == "session" {
+            // No owner exists. The normal gateway can write to this same canonical conversation.
+            if let currentID = result["session_id"] as? String, currentID != storedSessionID {
+                botSessionIDs[profile, default: []].insert(currentID)
+                try await openSession(profile: profile, sessionID: currentID)
+            }
+            let paths = lastSentPhotoPaths
+            let submitted = result["text"] as? String ?? text
+            activeBotReply = nil
+            isPreparingSend = false
+            submissionPending = false
+            try await sendSession(text: submitted, enrollment: enrollment, onEvent: onEvent)
+            lastSentPhotoPaths = paths
+            return
+        }
+        guard result["route"] as? String == "owner" else {
+            throw HermesSendError.outcomeUnknown("Hermes returned an unknown bot reply state. Check the conversation before sending again.")
+        }
+        submissionPending = false
+        isPreparingSend = false
+        remoteTurnRunning = true
+        onEvent(.accepted)
+        let deadline = Date().addingTimeInterval(1800)
+        while true {
+            guard activeBotReply?.id == id else { throw ConversationSuspended() }
+            switch result["status"] as? String {
+            case "settled":
+                if let currentID = result["session_id"] as? String {
+                    storedSessionID = currentID
+                    botSessionIDs[profile, default: []].insert(currentID)
+                    if let runtimeSessionID { sessionCoordinates[runtimeSessionID] = (profile, currentID) }
+                }
+                onEvent(.finalText(result["reply"] as? String ?? ""))
+                onEvent(.completed)
+                return
+            case "cancelled":
+                throw HermesSendError.notSubmitted("The bot reply was cancelled before it started.")
+            case "failed":
+                throw HermesSendError.turnFailed(result["error"] as? String ?? "Hermes could not complete the bot reply.")
+            case "ambiguous":
+                throw HermesSendError.outcomeUnknown(result["error"] as? String ?? "Check the conversation before sending again.")
+            case "queued": onEvent(.activity("Message queued"))
+            case "claimed": onEvent(.activity("Waiting for the bot reply…"))
+            case "preparing":
+                throw HermesSendError.outcomeUnknown("The bot reply is not confirmed. Check the conversation before sending again.")
+            default:
+                throw HermesSendError.outcomeUnknown("Hermes returned an unknown bot reply state. Check the conversation before sending again.")
+            }
+            guard Date() < deadline else {
+                throw HermesSendError.outcomeUnknown("The bot is still replying. Check the conversation before sending again.")
+            }
+            do {
+                try await Task.sleep(for: .seconds(1))
+                result = try await companionAPI(path, enrollment: enrollment)
+            } catch {
+                if activeBotReply?.id != id { throw ConversationSuspended() }
+                throw HermesSendError.outcomeUnknown("The connection ended while the bot was replying. Check the conversation before sending again.")
+            }
+        }
+    }
+
+    private func sendSession(text: String, photos: [DraftPhoto] = [], enrollment: CompanionEnrollment? = nil, onEvent: @escaping @MainActor (ChatEvent) -> Void) async throws {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !photos.isEmpty else { return }
         guard turnContinuation == nil, !isPreparingSend, !isExecutingCommand else { throw HermesSendError.notSubmitted("A reply or control action is already in progress.") }
         guard !remoteTurnRunning else { throw HermesSendError.notSubmitted("This Hermes session is already running. Wait for it to finish before sending another message.") }
@@ -460,6 +720,13 @@ final class HermesClient {
             preparationCancelled = true
             return
         }
+        if let reply = activeBotReply {
+            let result = try await companionAPI("bot-replies/" + reply.id, method: "DELETE", enrollment: reply.enrollment)
+            if result["status"] as? String == "claimed" {
+                throw HermesError.message("This bot reply has started. Stop it in Hermes on your computer.")
+            }
+            return
+        }
         guard let runtimeID = runtimeSessionID else { return }
         _ = try await rpc("session.interrupt", ["session_id": runtimeID])
         // This only acknowledges the interrupt request. The in-flight prompt remains
@@ -489,6 +756,7 @@ final class HermesClient {
         let commands = pairs.compactMap { pair -> HermesCommandSuggestion? in
             guard pair.count >= 2 else { return nil }
             let name = pair[0].lowercased()
+            guard !isBotConversation || !["/new", "/title"].contains(name) else { return nil }
             let isExtension = extensionNames.contains(pair[0]) || metadata[pair[0]] == nil
             // Older gateways discover extensions in their launch profile, even when profile is
             // supplied. Do not execute that potentially different profile's custom commands.
@@ -616,6 +884,9 @@ final class HermesClient {
         let words = command.trimmingCharacters(in: .whitespacesAndNewlines).split(maxSplits: 1, whereSeparator: \.isWhitespace)
         guard let token = words.first, token.hasPrefix("/") else { throw HermesCommandError.rejected("Commands start with /.") }
         let name = catalog.canonicalName(for: String(token))
+        if isBotConversation && ["/new", "/title"].contains(name) {
+            throw HermesCommandError.rejected("Bot Chat keeps one conversation and its fixed title. Use /compress to reduce its context. Use Profiles to start a separate session.")
+        }
         guard catalog.commands.contains(where: { $0.text == name }) else {
             throw HermesCommandError.rejected("\(token) is not available in this app. Type / to see this installation’s supported commands.")
         }
@@ -683,8 +954,12 @@ final class HermesClient {
             if !arg.isEmpty { request["focus_topic"] = arg }
             lastCommandNeedsHistoryRefresh = true
             lastCommandNeedsSessionRefresh = true
+            let compressingBot = isBotConversation
             let result = try await rpc("session.compress", request, timeoutSeconds: 600)
-            if let info = result["info"] as? [String: Any], let id = info["stored_session_id"] as? String, !id.isEmpty { storedSessionID = id }
+            if let info = result["info"] as? [String: Any], let id = info["stored_session_id"] as? String, !id.isEmpty {
+                storedSessionID = id
+                if compressingBot, let profile = selectedProfile { botSessionIDs[profile, default: []].insert(id) }
+            }
             if let summary = result["summary"] as? [String: Any] {
                 return .output(["headline", "token_line", "note"].compactMap { summary[$0] as? String }.filter { !$0.isEmpty }.joined(separator: "\n"))
             }
@@ -767,7 +1042,7 @@ final class HermesClient {
     }
 
     private static let commandDescriptions: [String: String] = [
-        "/new": "Start a new session with this bot", "/stop": "Stop this reply and Hermes background processes",
+        "/new": "Start a new session with this profile", "/stop": "Stop this reply and Hermes background processes",
         "/help": "Show available commands and explanations", "/title": "View or change this session’s title [name]",
         "/model": "View or change this session’s model [model]", "/reasoning": "Set this session’s reasoning effort [level]",
         "/save": "Export this conversation as JSON on your Hermes host", "/usage": "Show token usage for this session",
@@ -826,6 +1101,7 @@ final class HermesClient {
             if Task.isCancelled { return }
         }
         finishTurn(error: ConversationSuspended())
+        activeBotReply = nil
         runtimeSessionID = nil
         remoteTurnRunning = false
         clarifications.removeAll()
@@ -836,10 +1112,16 @@ final class HermesClient {
     }
 
     func suspendForBackground() {
+        activeBotReply = nil
+        isPreparingSend = false
+        submissionPending = false
         closeSocket(error: ConversationSuspended())
     }
 
     func disconnect() {
+        activeBotReply = nil
+        isPreparingSend = false
+        submissionPending = false
         closeSocket(error: HermesError.message("Disconnected from Hermes."))
         companionTransport = nil
         http.configuration.httpCookieStorage?.cookies?.forEach { http.configuration.httpCookieStorage?.deleteCookie($0) }
@@ -851,6 +1133,7 @@ final class HermesClient {
         storedSessionID = nil
         avatarCache = [:]
         draftSessions = [:]
+        botSessionIDs = [:]
         sessionCoordinates = [:]
     }
 
@@ -1011,10 +1294,12 @@ final class HermesClient {
         case "message.delta": eventHandler?(.delta(payload["text"] as? String ?? ""))
         case "message.complete":
             remoteTurnRunning = false
-            if let text = payload["text"] as? String { eventHandler?(.finalText(text)) }
             if payload["status"] as? String == "error" {
-                finishTurn(error: HermesError.message(payload["text"] as? String ?? "Hermes could not complete this turn."))
-            } else { finishTurn() }
+                finishTurn(error: HermesSendError.turnFailed(payload["text"] as? String ?? "Hermes could not complete this turn. Try again."))
+            } else {
+                if payload["status"] as? String != "interrupted", let text = payload["text"] as? String { eventHandler?(.finalText(text)) }
+                finishTurn()
+            }
         case "message.start": eventHandler?(.activity("Thinking"))
         case "tool.start", "tool.generating": eventHandler?(.activity("Using \(payload["name"] as? String ?? "a tool")"))
         case "tool.complete": eventHandler?(.activity("Thinking"))
@@ -1141,6 +1426,7 @@ final class HermesClient {
             let (data, status) = try await relay.request(path: path, method: method, query: query, body: body)
             guard (200..<300).contains(status) else {
                 let detail = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["detail"] as? String
+                if status == 404 { throw HermesHTTPError(statusCode: status, message: detail ?? "The companion returned HTTP 404.") }
                 throw HermesError.message(detail ?? "The companion returned HTTP \(status).")
             }
             let response = HTTPURLResponse(url: try endpoint(path, query: query), statusCode: status, httpVersion: nil, headerFields: nil)!
@@ -1164,7 +1450,7 @@ final class HermesClient {
             switch response.statusCode {
             case 301...399: throw HermesError.message("The server redirected this request. Enter the final dashboard address directly.")
             case 401, 403: throw HermesError.message("Hermes rejected these credentials. Use dashboard credentials; API_SERVER_KEY belongs to a different service.")
-            case 404: throw HermesError.message("This Hermes dashboard does not provide the requested feature. Check the address and update Hermes if needed.")
+            case 404: throw HermesHTTPError(statusCode: 404, message: "This Hermes dashboard does not provide the requested feature. Check the address and update Hermes if needed.")
             case 429: throw HermesError.message("Hermes is receiving too many requests. Try again shortly.")
             default: throw HermesError.message("Hermes returned HTTP \(response.statusCode). Check that the dashboard is running.")
             }

@@ -11,7 +11,7 @@ import SwiftUI
         WindowGroup {
             NavigationStack {
                 Group {
-                    if mode == "cache-profiles" { BotListView() }
+                    if mode == "cache-profiles" { BotListView(path: .constant([])) }
                     else if mode == "cache-sessions" || mode == "cache-sessions-active" { SessionListView(profile: profile) }
                     else { ChatView(sessionID: "saved") }
                 }
