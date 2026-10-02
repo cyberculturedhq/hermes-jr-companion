@@ -144,4 +144,6 @@ else:
         assert batch.result['answers'] == {'q1': 'A', 'q2': 'B'}, batch.result
         assert batch.result.get('outcome', 'submitted') == 'submitted', batch.result
         server_requests.cancel(sid)
+import runpy
+runpy.run_path(str(Path(__file__).with_name('bot_replies.py')), run_name='__main__')
 print('PASS: real Hermes mobile compatibility checks complete')

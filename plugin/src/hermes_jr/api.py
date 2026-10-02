@@ -8,6 +8,7 @@ from .service import Service, client_session
 from .state import State
 from .updates import public_status
 from .mobile import negotiate
+from .bot_replies import supported as bot_replies_supported
 
 PREFIX = "/api/plugins/hermes-jr"
 router = APIRouter()
@@ -30,6 +31,13 @@ async def handle(state, device_id, method, path, body, query, client):
     if path == "/v1/uploads" and method == "PUT":
         from .uploads import upload
         return upload(state, device_id, body)
+    if re.fullmatch(r'/v1/bot-replies/[0-9a-f-]{36}', path) and method in {'GET', 'PUT', 'DELETE'}:
+        from . import bot_replies
+        request_id = path.rsplit('/', 1)[1]
+        if method == 'PUT':
+            profile, sid = coordinate(body)
+            return bot_replies.submit(state, device_id, request_id, profile, sid, body)
+        return bot_replies.result(state, device_id, request_id, cancel=method == 'DELETE')
     if re.fullmatch(r'/v1/update-requests/[0-9a-f-]{36}', path) and method in {'GET', 'PUT'}:
         from .update_requests import register, status
         request_id = path.rsplit('/', 1)[1]
@@ -47,7 +55,7 @@ async def handle(state, device_id, method, path, body, query, client):
             raise ValueError('No shared mobile protocol')
         return negotiate({'protocols': [1], 'known_revision': query.get('known_revision')})
     if method == "GET" and path == "/v1/capabilities":
-        return {"file_upload": 1, "notification_scope": 1, "notification_encryption": 1, "protocol_version": 1, "relay_enabled": state.get("relay_enabled", False), "push_enabled": state.get("push_enabled", False), "installation_id": state.get("installation_id"), "update": public_status(state)}
+        return {"bot_replies": bot_replies_supported(), "file_upload": 1, "notification_scope": 1, "notification_encryption": 1, "protocol_version": 1, "relay_enabled": state.get("relay_enabled", False), "push_enabled": state.get("push_enabled", False), "installation_id": state.get("installation_id"), "update": public_status(state)}
     if path == "/v1/devices/self/notification-scope" and method in {"GET", "PUT"}:
         if method == "PUT":
             if set(body) != {"all_sessions"} or type(body.get("all_sessions")) is not bool:
@@ -101,7 +109,7 @@ async def handle(state, device_id, method, path, body, query, client):
 @router.get("/v1/capabilities")
 async def capabilities():
     state = State()
-    return {"file_upload": 1, "notification_scope": 1, "notification_encryption": 1, "protocol_version": 1, "relay_enabled": state.get("relay_enabled", False), "push_enabled": state.get("push_enabled", False), "installation_id": state.get("installation_id"), "update": public_status(state)}
+    return {"bot_replies": bot_replies_supported(), "file_upload": 1, "notification_scope": 1, "notification_encryption": 1, "protocol_version": 1, "relay_enabled": state.get("relay_enabled", False), "push_enabled": state.get("push_enabled", False), "installation_id": state.get("installation_id"), "update": public_status(state)}
 
 
 @router.post("/v1/enroll")
@@ -134,7 +142,8 @@ async def endpoint(rest: str, request: Request):
         device_id = request.headers.get("x-hermes-jr-device", "")
         state.authenticate(device_id, request.headers.get("x-hermes-jr-token", ""))
         raw = await request.body()
-        if len(raw) > (720_000 if rest == "uploads" else 4096):
+        limit = 2_000_000 if rest.startswith('bot-replies/') else 720_000 if rest == 'uploads' else 4096
+        if len(raw) > limit:
             raise HTTPException(413, "Request too large")
         body = await request.json() if raw else {}
         if not isinstance(body, dict):
