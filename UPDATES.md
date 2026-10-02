@@ -47,6 +47,12 @@ Rollback refuses to overwrite subsequent local code changes. Backups and private
 
 Then restart loaded Hermes processes when idle and run `hermes jr doctor`. Keep backups until you are satisfied with the update. Never delete private state to repair installed code.
 
+## When Hermes cannot send command approval to the phone
+
+If Hermes says the attached client cannot answer approval requests, the update command did not run. The client in that message is the companion bridge connecting the phone to Hermes. A newer iPhone app alone cannot fix an older bridge that does not register approval support.
+
+Install companion 0.17.3 or a later release containing this fix once from the host computer. Use **Copy update prompt** and submit it through a Hermes client on the computer that supports command approval; keeping the full prompt preserves its installer receipt. Alternatively, run the official signed bootstrap with `--update` directly when Hermes work is idle, as described in [INSTALL.md](INSTALL.md). After that installation, the phone can display approval requests for future **Update with Hermes** actions. Registering approval support does not approve a command: the user must still choose whether to allow each requested operation.
+
 ## Updating an older companion
 
 For installations before 0.17.0, stop Hermes Jr. and finish active Hermes work. Move every old `plugins/hermes-jr` directory out of the Hermes home (the default profile and each named profile) into a private backup, then finish the pending Hermes Agent update. The old plugin directory contains a `pyproject.toml`; multiple enabled copies cause Hermes' new package manager to reject the shared workspace, so individual profile removals can fail until the duplicate set is gone. Keep the profile installation metadata and companion state in place. Once Hermes updates, use the current [INSTALL.md](INSTALL.md) procedure to install the newly released plugin across profiles, and run `hermes jr doctor`. Do not delete companion state or pairings unless you intend to reset them.

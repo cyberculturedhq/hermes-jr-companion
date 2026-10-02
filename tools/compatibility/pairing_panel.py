@@ -70,7 +70,8 @@ def command(job_id, session_id):
     def execute(arguments):
         process = subprocess.run(arguments['command'], shell=True, capture_output=True, text=True, timeout=15)
         assert '1234 5678 9012' not in process.stdout, 'The code leaked into the model-facing CLI output'
-        return json.dumps({'output': process.stdout + process.stderr, 'exit_code': process.returncode})
+        assert process.returncode == 0, {'exit_code': process.returncode, 'stdout': process.stdout, 'stderr': process.stderr}
+        return json.dumps({'output': process.stdout, 'stderr': process.stderr, 'exit_code': process.returncode})
     return run_tool_execution_middleware('terminal',
         {'command': shlex.join([sys.executable, '-m', 'hermes_jr.cli', 'pair', '--watch', job_id])},
         execute, session_id=session_id, task_id=session_id)
