@@ -1,3 +1,14 @@
+## 0.18.1
+
+- Preserve local plugin edits made while an update or rollback stops the service.
+- Reject Linux service startup when a foreground bridge already holds the connection.
+- Keep network timeout recovery active on Python 3.10.
+- Keep older queued reply notifications outside a guided update's suppression period.
+- Return clear errors for missing Bot Chat attachments and duplicate or missing upload chunks. Check attachment file information once.
+- Reject malformed pairing, configuration, upload, and interaction requests without interrupting the connection.
+
+Protocol and state compatibility remain at version 1. Existing pairings and profile settings are preserved. Update when Hermes work is idle, then restart loaded Hermes processes. No relay deployment is required.
+
 ## 0.18.0
 
 - Send iPhone replies to the existing Bot Chat owner through Hermes' durable mailbox. Busy owners receive the message after their current turn.

@@ -143,7 +143,7 @@ class BotReplyTests(unittest.TestCase):
         data = base64.b64encode(b'image bytes').decode()
         reference = {'upload_id': uid, 'filename': 'photo.jpg'}
         upload(self.state, self.other, dict(**reference, content_base64=data, offset=0, total=11))
-        with self.assertRaises(FileNotFoundError): self.submit({**self.body, 'attachments': [reference]})
+        with self.assertRaises(ValueError): self.submit({**self.body, 'attachments': [reference]})
         upload(self.state, self.phone, dict(**reference, content_base64=data, offset=0, total=12))
         with self.assertRaises(ValueError): self.submit({**self.body, 'attachments': [reference]})
         upload(self.state, self.phone, dict(**reference, content_base64=base64.b64encode(b'!').decode(), offset=11, total=12))
@@ -154,4 +154,23 @@ class BotReplyTests(unittest.TestCase):
     def test_client_cannot_choose_an_owner_or_bot_author(self):
         for field in ('owner', 'author', 'path'):
             with self.assertRaises(ValueError): self.submit({**self.body, field: 'forged'})
+        self.assertFalse(self.admissions)
+
+    def test_attachments_reject_file_and_directory_symlinks(self):
+        outside = self.home / 'photo.jpg'
+        outside.write_bytes(b'image bytes')
+        for kind in ('file', 'directory'):
+            with self.subTest(kind=kind):
+                reference = {'upload_id': str(uuid.uuid4()), 'filename': 'photo.jpg'}
+                result = upload(self.state, self.phone, dict(**reference,
+                    content_base64=base64.b64encode(b'image bytes').decode(), offset=0, total=11))
+                target = Path(result['path'])
+                if kind == 'file':
+                    target.unlink()
+                    target.symlink_to(outside)
+                else:
+                    target.parent.rename(target.parent.with_name(reference['upload_id'] + '-original'))
+                    target.parent.symlink_to(outside.parent, target_is_directory=True)
+                with self.assertRaises(ValueError):
+                    self.submit({**self.body, 'attachments': [reference]})
         self.assertFalse(self.admissions)

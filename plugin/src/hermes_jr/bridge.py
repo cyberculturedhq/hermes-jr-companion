@@ -101,7 +101,7 @@ class Peer:
                 return
             try:
                 await self.local.send(frame)
-            except (ValueError, PermissionError, aiohttp.ClientError, ConnectionError, TimeoutError):
+            except (ValueError, PermissionError, aiohttp.ClientError, ConnectionError, asyncio.TimeoutError, TimeoutError):
                 await self.emit({"type": "rpc", "body": {"jsonrpc": "2.0", "id": frame.get("id") if isinstance(frame, dict) else None,
                                                         "error": {"code": -32000, "message": "Your iPhone reached the companion, but it couldn’t connect to the local Hermes backend. Restore the Hermes backend, then reconnect."}}})
         elif envelope.get("type") == "http":
@@ -114,7 +114,7 @@ class Peer:
                 status, body = 404, {"detail": "Operation or notification not found"}
             except (ValueError, TypeError):
                 status, body = 400, {"detail": "Invalid request or companion service configuration"}
-            except (aiohttp.ClientError, TimeoutError):
+            except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError):
                 pass
             await self.emit({"type": "http", "id": envelope.get("id"), "status": status, "body": body})
             if envelope.get("path") in {"/api/profiles", "/api/plugins/hermes-jr/v1/mobile/api/profiles"} and status == 200 and isinstance(body, dict) and isinstance(body.get("profiles"), list):
@@ -169,7 +169,7 @@ class Bridge:
                                 except Exception:
                                     peer.reset()
                                     log.warning("Rejected an invalid device connection")
-            except (aiohttp.ClientError, ValueError, TypeError, ConnectionError, TimeoutError):
+            except (aiohttp.ClientError, ValueError, TypeError, ConnectionError, asyncio.TimeoutError, TimeoutError):
                 log.warning("Relay unavailable; reconnecting")
             finally:
                 self.socket = None
@@ -200,7 +200,7 @@ class Bridge:
                     try:
                         await self.service.send_push(event)
                         ok = True
-                    except (aiohttp.ClientError, ValueError, TimeoutError):
+                    except (aiohttp.ClientError, ValueError, asyncio.TimeoutError, TimeoutError):
                         log.warning("Notification service unavailable; delivery will retry")
                     self.state.sent(event["reference"], ok)
             tick += 1

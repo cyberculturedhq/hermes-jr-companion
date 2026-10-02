@@ -28,7 +28,7 @@ async def check(state, client):
             value = await asyncio.wait_for(Service(state, client).request('GET', '/v1/capabilities'), 10)
             result['service'] = 'ok' if isinstance(value, dict) and value.get('protocol_version') == 1 else 'incompatible'
             result['service_push'] = isinstance(value, dict) and value.get('push') is True
-        except (aiohttp.ClientError, ValueError, KeyError, TimeoutError):
+        except (aiohttp.ClientError, ValueError, KeyError, asyncio.TimeoutError, TimeoutError):
             result['service'] = 'unavailable'
     try:
         gateway = Gateway(state, client)
@@ -46,7 +46,7 @@ async def check(state, client):
                 result['dashboard_plugin'] = 'ok' if isinstance(data, dict) and data.get('protocol_version') == 1 else 'incompatible'
             else:
                 result['dashboard_plugin'] = 'not_loaded_or_unauthorized'
-    except (aiohttp.ClientError, ValueError, KeyError, TimeoutError):
+    except (aiohttp.ClientError, ValueError, KeyError, asyncio.TimeoutError, TimeoutError):
         pass
     try:
         await Gateway(state, client).probe()
@@ -56,7 +56,7 @@ async def check(state, client):
         result['dashboard_rpc_http_status'] = exc.status
     except aiohttp.ClientConnectorError:
         result['dashboard_rpc'] = 'not_listening'
-    except TimeoutError:
+    except (asyncio.TimeoutError, TimeoutError):
         result['dashboard_rpc'] = 'timeout'
     except (aiohttp.ClientError, ValueError, KeyError, PermissionError, ConnectionError):
         result['dashboard_rpc'] = 'authentication_or_protocol_failed'

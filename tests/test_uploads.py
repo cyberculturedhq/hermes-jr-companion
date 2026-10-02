@@ -17,7 +17,7 @@ class UploadTests(unittest.TestCase):
     def test_chunks_and_device_isolation(self):
         first = upload(self.state, 'a', self.body)
         self.assertEqual(first, {'offset': 3, 'complete': False, 'path': None})
-        with self.assertRaises(FileNotFoundError):
+        with self.assertRaises(ValueError):
             upload(self.state, 'b', dict(self.body, offset=3))
         second = upload(self.state, 'a', dict(self.body, offset=3))
         self.assertTrue(second['complete'])
@@ -26,7 +26,7 @@ class UploadTests(unittest.TestCase):
 
     def test_retries_do_not_append_or_overwrite(self):
         upload(self.state, 'a', self.body)
-        with self.assertRaises(FileExistsError):
+        with self.assertRaises(ValueError):
             upload(self.state, 'a', self.body)
         with self.assertRaises(ValueError):
             upload(self.state, 'a', dict(self.body, offset=2))
@@ -35,7 +35,8 @@ class UploadTests(unittest.TestCase):
 
     def test_invalid_paths_sizes_and_data(self):
         for changes in [dict(filename='../x'), dict(filename='/tmp/x'), dict(filename='..'),
-                        dict(filename='a\nb'), dict(upload_id='../x'), dict(offset=-1),
+                        dict(filename='a\nb'), dict(upload_id='../x'), dict(upload_id=[]),
+                        dict(upload_id=None), dict(offset=-1),
                         dict(total=MAX_BYTES+1), dict(total=0), dict(total=2),
                         dict(content_base64='!'), dict(content_base64=''),
                         dict(content_base64=base64.b64encode(b'x'*(CHUNK_BYTES+1)).decode())]:

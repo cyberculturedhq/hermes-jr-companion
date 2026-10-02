@@ -111,8 +111,10 @@ class MobileAdapter:
             # guarantees profile scoping; clients filter using commands.catalog.
             out = {'text': params.get('text', '')}
         public_id = params.get('request_id', '')
+        if not isinstance(public_id, str):
+            raise ValueError('Interaction request ID must be a string')
         interaction = self.interactions.get(public_id)
-        if isinstance(public_id, str) and public_id.startswith('jr-request:'):
+        if public_id.startswith('jr-request:'):
             if not interaction or params.get('session_id') != interaction['sid']:
                 raise ValueError('This interaction is no longer pending in this session')
             kind = interaction['method']
@@ -131,7 +133,7 @@ class MobileAdapter:
                 questions = interaction['params'].get('questions')
                 if questions:
                     qid = params.get('question_id')
-                    if qid not in {q.get('qid') for q in questions}:
+                    if not isinstance(qid, str) or qid not in {q.get('qid') for q in questions}:
                         raise ValueError('Unknown clarification question')
                     translated = 'clarify.lock'
                     out = {'request_id': interaction['id'], 'question_id': qid, 'answer': params['answer']}

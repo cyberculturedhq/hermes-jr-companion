@@ -65,6 +65,19 @@ class ServiceTests(unittest.TestCase):
         other = Supervisor(State(self.root / 'other'), home=self.root, platform='darwin')
         self.assertNotEqual(other.label, self.manager.label)
 
+    def test_systemd_start_rejects_a_foreground_bridge(self):
+        manager = Supervisor(self.state, home=self.root, platform='linux')
+        private_write(manager.path, manager.definition('/tmp/python'))
+        with (self.state.directory / 'bridge.lock').open('w') as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX)
+            with patch.object(manager, 'command', return_value=Mock(returncode=3)) as command:
+                with self.assertRaisesRegex(ValueError, 'foreground bridge'):
+                    manager.start()
+                command.assert_called_once_with(['systemctl', '--user', 'is-active', manager.unit], check=False)
+            with patch.object(manager, 'command', return_value=Mock(returncode=0)) as command:
+                manager.start()
+                self.assertEqual(command.call_args.args[0], ['systemctl', '--user', 'start', manager.unit])
+
     def test_uninstall_stops_owned_service_and_preserves_pairing_state(self):
         self.state.settings({'host_token': 'test credential'})
         private_write(self.manager.path, self.manager.definition('/tmp/python'))
@@ -130,6 +143,15 @@ class UpdateTests(unittest.IsolatedAsyncioTestCase):
         with patch('hermes_jr.updates.get_json', fetch):
             self.assertEqual((await check(self.state, None))['state'], 'unavailable')
         self.assertEqual(fetch.await_count, 1)
+
+    async def test_python310_async_timeout_does_not_crash_release_checks(self):
+        class AsyncTimeout(Exception):
+            pass
+        with patch('hermes_jr.updates.asyncio.TimeoutError', AsyncTimeout), \
+             patch('hermes_jr.updates.get_json', AsyncMock(side_effect=AsyncTimeout('private details'))):
+            result = await check(self.state, None)
+        self.assertEqual(result['state'], 'unavailable')
+        self.assertNotIn('private details', json.dumps(result))
 
     async def test_annotated_release_tag_resolves_commit(self):
         fetch = AsyncMock(side_effect=[{'tag_name':'v0.3.0', 'body': body()}, {'object':{'type':'tag','sha':'b'*40}}, {'object':{'type':'commit','sha':'a'*40}}])

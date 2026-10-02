@@ -43,9 +43,10 @@ def validate_rpc(frame):
     params = frame.get("params", {})
     if not isinstance(params, dict):
         raise ValueError("RPC parameters must be an object")
-    if name == "config.get" and params.get("key") not in {"profile", "model", "reasoning", "provider", "reasoning_effort"}:
+    key = params.get("key")
+    if name == "config.get" and (not isinstance(key, str) or key not in {"profile", "model", "reasoning", "provider", "reasoning_effort"}):
         raise ValueError("Configuration key is not allowed")
-    if name == "config.set" and params.get("key") not in {"model", "reasoning"}:
+    if name == "config.set" and (not isinstance(key, str) or key not in {"model", "reasoning"}):
         raise ValueError("Configuration key is not allowed")
     if name == "session.create":
         params = {**params, "close_on_disconnect": False}
