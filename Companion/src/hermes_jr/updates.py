@@ -74,7 +74,7 @@ async def check(state, client, *, force=False):
             result.update(signature=signature, state='available' if latest > version(result['installed']) else 'current',
                           latest=tag.lstrip('v'), commit=sha,
                           url='https://github.com/' + REPOSITORY + '/releases/tag/' + tag)
-    except (ValueError, TypeError, KeyError, aiohttp.ClientError, TimeoutError):
+    except (ValueError, TypeError, KeyError, aiohttp.ClientError, asyncio.TimeoutError, TimeoutError):
         pass  # Do not include raw network errors, metadata, credentials, or URLs in logs.
     state.settings({'update_status': result})
     return result

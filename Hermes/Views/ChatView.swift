@@ -765,6 +765,7 @@ private struct OutgoingSendAnimation: ViewModifier {
         let source = sourceFrame ?? composerFrame
         let widthProgress = reduceMotion || source.isEmpty ? 1 : contraction
         let flightProgress = reduceMotion || source.isEmpty ? 1 : travel
+        let flightOpacity: Double = reduceMotion ? 0.25 + 0.75 * travel : 1
         content
             .visualEffect { effect, geometry in
                 effect.offset(
@@ -791,7 +792,7 @@ private struct OutgoingSendAnimation: ViewModifier {
                 return effect
                     .offset(x: (source.maxX - destination.maxX) * (1 - flightProgress),
                             y: max(0, source.minY - destination.minY) * (1 - flightProgress))
-                    .opacity(reduceMotion ? 0.25 + 0.75 * travel : 1)
+                    .opacity(flightOpacity)
             }
             .task {
                 guard travel == 0 else { return }

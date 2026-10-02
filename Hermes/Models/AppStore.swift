@@ -173,7 +173,7 @@ extension AppStore {
             if !restoring {
                 cachedContent = ContentSnapshot()
                 selectedProfile = nil; selectedSession = nil
-                sessions = []; messages = []; resetCommands()
+                sessions = []; messages = []; resetHistoryPagination(); resetCommands()
             }
             cacheProfiles(bots)
             // Warm conversation lists while onboarding still shows connection progress.
@@ -985,11 +985,13 @@ final class AppStore {
 
     @discardableResult
     private func prepareConversationSwitch() async -> Int {
+        guard !Task.isCancelled else { return generation }
         if let profile = selectedProfile, let session = selectedSession, !messages.isEmpty {
             cacheConversation(messages.filter { !$0.isStreaming || !$0.text.isEmpty }, profile: profile.id, sessionID: session.id)
         }
         conversationWatch?.cancel(); conversationWatch = nil
         generation += 1
+        isLoadingOlderMessages = false
         let attempt = generation
         await client.detachConversation()
         guard generation == attempt else { return attempt }
@@ -1173,7 +1175,7 @@ final class AppStore {
             settings = saved
             if phaseDuringAttempt != .restoring {
                 selectedProfile = nil; selectedSession = nil
-                sessions = []; messages = []; resetCommands()
+                sessions = []; messages = []; resetHistoryPagination(); resetCommands()
                 cachedContent = ContentSnapshot()
             }
             cacheProfiles(bots)
@@ -1244,8 +1246,7 @@ final class AppStore {
         sessions = cachedContent.sessions[profile.id]?.value ?? []
         messages = []
         sessionReady = false
-        messageWindowStart = 0
-        hasOlderMessages = false
+        resetHistoryPagination()
         resetCommands()
         errorMessage = nil
         conversationRefresh = ContentRefreshStatus(phase: .checking)
@@ -1272,7 +1273,10 @@ final class AppStore {
         let switchID = UUID()
         conversationSwitchID = switchID
         defer { if conversationSwitchID == switchID { conversationSwitchID = nil } }
-        await prepareConversationSwitch()
+        let connection = client
+        let attempt = await prepareConversationSwitch()
+        guard !Task.isCancelled, generation == attempt, client === connection,
+              conversationSwitchID == switchID else { return }
         selectedProfile = profile
         selectedSession = nil
         let prepared = preparedSessionsClient === client ? preparedSessions.removeValue(forKey: profile.id) : nil
@@ -1281,6 +1285,7 @@ final class AppStore {
         sessionRefresh = ContentRefreshStatus(phase: phase == .connected ? .checking : phase == .restoring ? .connecting : .unavailable,
                                               updatedAt: cachedContent.sessions[profile.id]?.updatedAt)
         messages = []
+        resetHistoryPagination()
         resetCommands()
         errorMessage = nil
         if let prepared { cacheSessions(prepared, profile: profile.id) }
@@ -1334,7 +1339,7 @@ final class AppStore {
         let anchor = messages.first?.id
         let startingOffset = historyOffset
         isLoadingOlderMessages = true
-        defer { isLoadingOlderMessages = false }
+        defer { if attempt == generation { isLoadingOlderMessages = false } }
         do {
             while historyOffset - startingOffset < 100_000 {
                 let offset = historyOffset
@@ -1382,6 +1387,14 @@ final class AppStore {
         historyOffset = page.returned
         hasOlderMessages = page.hasOlder
         rawMessagePositions = Dictionary(uniqueKeysWithValues: zip(page.messages.map(\.id), page.offsetsFromNewest))
+    }
+
+    private func resetHistoryPagination() {
+        messageWindowStart = 0
+        historyOffset = 0
+        rawMessagePositions = [:]
+        hasOlderMessages = false
+        isLoadingOlderMessages = false
     }
 
     private func mergeRecentMessages(_ page: HermesClient.MessagePage) {
@@ -1455,10 +1468,7 @@ final class AppStore {
         if !sessions.contains(where: { $0.id == session.id }) { sessions.insert(session, at: 0) }
         selectedSession = session
         sessionReady = false
-        messageWindowStart = 0
-        hasOlderMessages = false
-        historyOffset = 0
-        rawMessagePositions = [:]
+        resetHistoryPagination()
         conversationRefresh = ContentRefreshStatus(phase: phase == .connected ? .checking : phase == .restoring ? .connecting : .unavailable,
                                                     updatedAt: cachedContent.conversations[profile.id]?[session.id]?.updatedAt)
         if !reopeningCurrentSession {
@@ -1582,19 +1592,22 @@ final class AppStore {
         let switchID = UUID()
         conversationSwitchID = switchID
         defer { if conversationSwitchID == switchID { conversationSwitchID = nil } }
-        await prepareConversationSwitch()
+        let connection = client
+        let attempt = await prepareConversationSwitch()
+        guard !Task.isCancelled, generation == attempt, client === connection,
+              conversationSwitchID == switchID else { return }
         errorMessage = nil
         isLoadingMessages = true
-        let attempt = generation
         defer { if attempt == generation { isLoadingMessages = false } }
         do {
-            let session = try await client.createSession(profile: profile.id)
+            let session = try await connection.createSession(profile: profile.id)
             guard attempt == generation else { return }
             sessions.insert(session, at: 0)
             selectedSession = session
             sessionReady = true
             conversationRefresh = ContentRefreshStatus(phase: .idle, updatedAt: Date())
             messages = []
+            resetHistoryPagination()
             resetCommands()
             if followInBackground {
                 let connection = client
@@ -2033,6 +2046,7 @@ final class AppStore {
         selectedSession = nil
         sessions = []
         messages = []
+        resetHistoryPagination()
         resetCommands()
         isLoadingSessions = false
         isLoadingMessages = false
@@ -2046,6 +2060,7 @@ final class AppStore {
         notificationDestination = nil
         selectedSession = nil
         messages = []
+        resetHistoryPagination()
         resetCommands()
         isLoadingMessages = false
         isLoadingSessions = false
@@ -2083,6 +2098,7 @@ final class AppStore {
         selectedSession = nil
         sessions = []
         messages = []
+        resetHistoryPagination()
         resetCommands()
         isSending = false
         isLoadingMessages = false
@@ -2176,10 +2192,7 @@ extension AppStore {
             persistContent()
             return
         }
-        var safeRows = Array(rows.suffix(200)).map { row in
-            var row = row; row.isStreaming = false; row.photos = []; return row
-        }
-        while !safeRows.isEmpty, (try? JSONEncoder().encode(safeRows).count) ?? Int.max > 750_000 { safeRows.removeFirst() }
+        let safeRows = ContentCache.conversationRows(rows)
         guard !safeRows.isEmpty else { return }
         cachedContent.conversations[profile, default: [:]][sessionID] = CachedContent(value: safeRows, updatedAt: now)
         let recent = cachedContent.conversations.flatMap { profile, sessions in sessions.map { (profile, $0.key, $0.value.updatedAt) } }.sorted { $0.2 > $1.2 }
@@ -2190,6 +2203,7 @@ extension AppStore {
         if let profile = selectedProfile {
             guard let updated = profiles.first(where: { $0.id == profile.id }) else {
                 selectedProfile = nil; selectedSession = nil; sessions = []; messages = []; sessionReady = false
+                resetHistoryPagination()
                 return
             }
             selectedProfile = updated

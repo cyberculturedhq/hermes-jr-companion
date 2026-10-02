@@ -120,6 +120,8 @@ final class SetupPairing {
     private let account: String
     private let service: String
     private var pending: SavedSetup?
+    private var needsRestore = false
+    private var savedSetupInvalid = false
     private var revision = 0
     private(set) var busy = false
     private(set) var confirming = false
@@ -133,6 +135,7 @@ final class SetupPairing {
     private(set) var promptRateLimited = false
     var hasAttempt: Bool { pending != nil }
     var failure: SetupFailure? {
+        if savedSetupInvalid { return .verification }
         guard let state = pending else { return nil }
         if let reason = state.failure { return reason }
         if state.failed { return .unknown }
@@ -156,11 +159,30 @@ final class SetupPairing {
 
     init(network: (any SetupNetworking)? = nil, account: String = "setup/pending/v1", service: String = SetupPairing.service) {
         self.network = network ?? SetupHTTPClient(); self.account = account; self.service = service
-        pending = try? CredentialStore.readValue(SavedSetup.self, account: account)
-        if pending?.service != service {
-            pending = nil; CredentialStore.delete(account: account)
+        _ = restorePending()
+    }
+
+    private func restorePending() -> Bool {
+        do {
+            pending = try CredentialStore.readValue(SavedSetup.self, account: account)
+            if let pending, pending.service != service {
+                self.pending = nil; CredentialStore.delete(account: account)
+            }
+            hasSelection = pending?.selected != nil
+            needsRestore = false
+            savedSetupInvalid = false
+            error = nil
+            return true
+        } catch {
+            // A failed read does not prove that the saved attempt is absent.
+            // Keep its keys and retry the read before creating another attempt.
+            needsRestore = true
+            if let failure = error as? CredentialReadError, case .invalidData = failure {
+                savedSetupInvalid = true
+            }
+            self.error = error.localizedDescription
+            return false
         }
-        hasSelection = pending?.selected != nil
     }
 
     private func save(_ state: SavedSetup) throws {
@@ -174,7 +196,9 @@ final class SetupPairing {
     private func current(_ state: SavedSetup) -> Bool { pending?.intentID == state.intentID && !Task.isCancelled }
 
     func prepare() async {
-        guard !busy, pending == nil else { return }
+        guard !busy else { return }
+        if needsRestore, !restorePending() { return }
+        guard pending == nil else { return }
         busy = true; error = nil; promptServiceUnavailable = false; promptRateLimited = false
         let attempt = revision
         defer { busy = false }
@@ -354,6 +378,8 @@ final class SetupPairing {
         promptRateLimited = false
         pushPermissionDenied = false
         setupServiceUnreachable = false
+        needsRestore = false
+        savedSetupInvalid = false
         revision += 1; pending = nil; comparisons = []; hasSelection = false; error = nil; pushEnabled = false
         CredentialStore.delete(account: account)
     }

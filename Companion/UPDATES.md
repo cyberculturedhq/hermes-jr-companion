@@ -18,6 +18,8 @@ hermes jr update --checks on
 
 ## Install an update
 
+For Bot Chat replies, install companion 0.18.0 and the matching iPhone app. Hermes' live Bot Chat mailbox sends the human reply to the process that already controls the conversation. Busy owners receive the reply after their current turn. If the current owner cannot receive live messages, update Hermes on that computer. Restart loaded Hermes processes when idle after the companion update.
+
 Ask Hermes:
 
 > Update my Hermes Jr. companion from https://github.com/cyberculturedhq/hermes-jr-companion. Read UPDATES.md, wait for active work to finish, and run hermes jr update --install. Preserve my pairings and profile settings. Restart loaded Hermes processes when idle and run hermes jr doctor. Report any unfinished steps.
@@ -46,6 +48,12 @@ Rollback refuses to overwrite subsequent local code changes. Backups and private
 ```
 
 Then restart loaded Hermes processes when idle and run `hermes jr doctor`. Keep backups until you are satisfied with the update. Never delete private state to repair installed code.
+
+## When Hermes cannot send command approval to the phone
+
+If Hermes says the attached client cannot answer approval requests, the update command did not run. The client in that message is the companion bridge connecting the phone to Hermes. A newer iPhone app alone cannot fix an older bridge that does not register approval support.
+
+Install a companion release containing the approval-handshake fix once from the Mac. Use **Copy update prompt** and submit it through a Hermes client on the Mac that supports command approval; keeping the full prompt preserves its installer receipt. Alternatively, run the official signed bootstrap with `--update` directly when Hermes work is idle, as described in [INSTALL.md](INSTALL.md). After that installation, the phone can display approval requests for future **Update with Hermes** actions. Registering approval support does not approve a command: the user must still choose whether to allow each requested operation.
 
 ## Updating an older companion
 

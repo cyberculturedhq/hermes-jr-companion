@@ -157,4 +157,26 @@ final class NotificationNavigationTests: XCTestCase {
         XCTAssertTrue(store.sessionReady)
         XCTAssertNil(store.errorMessage)
     }
+
+    func testNewSessionClearsPreviousTranscriptPagination() async throws {
+        await connect()
+        await store.selectProfile(try XCTUnwrap(store.profiles.first { $0.id == "default" }))
+        store.messages = (0..<100).map { ChatMessage(id: "old-\($0)", role: "assistant", text: "Old reply") }
+        store.messageWindowStart = 30
+        store.hasOlderMessages = true
+        store.isLoadingOlderMessages = true
+
+        await store.createSession()
+
+        XCTAssertTrue(store.sessionReady, store.errorMessage ?? "Session is not ready")
+        XCTAssertEqual(store.selectedSession?.id, "update-conversation")
+        XCTAssertTrue(store.messages.isEmpty)
+        XCTAssertEqual(store.messageWindowStart, 0)
+        XCTAssertFalse(store.hasOlderMessages)
+        XCTAssertFalse(store.isLoadingOlderMessages)
+        store.messages = [ChatMessage(id: "new", role: "user", text: "New prompt")]
+        XCTAssertEqual(store.visibleWindowMessages.map(\.id), ["new"])
+        let stats = try await control()
+        XCTAssertEqual(stats["creates"] as? Int, 1)
+    }
 }

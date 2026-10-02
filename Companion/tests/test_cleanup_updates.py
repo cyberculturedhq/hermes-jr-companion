@@ -62,6 +62,19 @@ class CleanupTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ServiceError):
             await service.delete_device(str(uuid.uuid4()))
 
+    async def test_python310_async_timeout_preserves_remote_cleanup_retry(self):
+        class AsyncTimeout(Exception):
+            pass
+        expired = self.device()
+        service = AsyncMock()
+        service.delete_device.side_effect = AsyncTimeout()
+        with patch('hermes_jr.cleanup.asyncio.TimeoutError', AsyncTimeout):
+            await sweep(self.state, service)
+        with self.state.connect() as db:
+            pending = db.execute('SELECT attempts,next_attempt FROM remote_deletions WHERE device_id=?', (expired,)).fetchone()
+        self.assertEqual(pending['attempts'], 1)
+        self.assertGreater(pending['next_attempt'], time.time())
+
     async def test_manual_revocation_is_retried_without_expiring_approved_phones(self):
         device = self.device(approved=True)
         self.state.revoke(device)

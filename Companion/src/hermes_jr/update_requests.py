@@ -15,6 +15,8 @@ import uuid
 from .updates import installed_version, version
 from .state import token
 
+CLOCK_SKEW = 300
+
 SCHEMA = """CREATE TABLE IF NOT EXISTS update_requests (
     id TEXT PRIMARY KEY, device_id TEXT NOT NULL, profile TEXT NOT NULL,
     session_id TEXT NOT NULL, target TEXT NOT NULL, notify INTEGER NOT NULL,
@@ -40,7 +42,7 @@ def validate(value):
     if not isinstance(value['target'], str) or len(value['target']) > 32:
         raise ValueError('Invalid update version')
     version(value['target'])
-    if type(value['notify']) is not bool or type(value['created']) not in (int, float) or not time.time() - 86400 <= value['created'] <= time.time() + 300:
+    if type(value['notify']) is not bool or type(value['created']) not in (int, float) or not time.time() - 86400 <= value['created'] <= time.time() + CLOCK_SKEW:
         raise ValueError('Invalid or expired update request')
     return value
 

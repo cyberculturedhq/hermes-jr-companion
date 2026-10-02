@@ -96,6 +96,45 @@ final class SetupPairingTests: XCTestCase {
         return pairing
     }
 
+    func testFailedSavedSetupReadPreservesCredentialsAndBlocksReplacement() async throws {
+        let saved = "Saved setup data with an unsupported schema"
+        try CredentialStore.saveValue(saved, account: account)
+        let broker = SetupFixtureBroker()
+        let pairing = SetupPairing(network: broker, account: account, service: broker.service)
+        XCTAssertNotNil(pairing.error)
+        XCTAssertEqual(pairing.failure, .verification)
+        XCTAssertEqual(try CredentialStore.readValue(String.self, account: account), saved)
+
+        await pairing.prepare()
+        XCTAssertNotNil(pairing.error)
+        XCTAssertFalse(pairing.hasAttempt)
+        XCTAssertTrue(broker.ticket.isEmpty, "A failed read must not create another setup attempt.")
+        XCTAssertEqual(try CredentialStore.readValue(String.self, account: account), saved)
+
+        // Explicit cancellation permits a new attempt.
+        pairing.cancel()
+        await pairing.prepare()
+        XCTAssertNil(pairing.error)
+        XCTAssertTrue(pairing.hasAttempt)
+        XCTAssertFalse(broker.ticket.isEmpty)
+    }
+
+    func testSavedSetupReadCanRecoverWithoutReplacingTheAttempt() async throws {
+        let broker = SetupFixtureBroker()
+        let original = await ready(broker)
+        let ticket = broker.ticket
+        try CredentialStore.saveValue("unreadable setup", account: account)
+        let restored = SetupPairing(network: broker, account: account, service: broker.service)
+        XCTAssertNotNil(restored.error)
+        // The original flow still has its saved keys and can persist them again.
+        original.connectionFailed()
+        await restored.prepare()
+        XCTAssertNil(restored.error)
+        XCTAssertEqual(restored.prompt, original.prompt)
+        XCTAssertTrue(restored.needsConnectionRetry)
+        XCTAssertEqual(broker.ticket, ticket)
+    }
+
     func testServerPromptIsUsedVerbatimAndSurvivesRelaunch() async throws {
         let broker = SetupFixtureBroker(), pairing = await ready(broker)
         let expected = try XCTUnwrap(broker.promptPrefix) + broker.ticket

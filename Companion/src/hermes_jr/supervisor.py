@@ -135,6 +135,8 @@ class Supervisor:
                 self.command(['launchctl', 'enable', f'{self.domain}/{self.label}'])
                 self.command(['launchctl', 'bootstrap', self.domain, str(self.path)])
         else:
+            if bridge_running(self.directory) and self.command(['systemctl', '--user', 'is-active', self.unit], check=False).returncode:
+                raise ValueError('Stop the foreground bridge before starting the managed service')
             self.command(['systemctl', '--user', 'start', self.unit])
         for _ in range(150):
             if bridge_running(self.directory):

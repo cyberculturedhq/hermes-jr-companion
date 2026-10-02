@@ -1,3 +1,15 @@
+## Unreleased
+
+- Reject malformed upload, enrollment, approval, clarification, and configuration requests without closing a healthy phone connection.
+- Preserve remote cleanup retries and controlled error reports on Python 3.10.
+- Reject managed Linux startup while a foreground bridge is active.
+- Preserve older queued reply notifications when a later update receipt uses the same conversation.
+- Check attachment file status once and preserve device ownership, upload completion, and symbolic-link restrictions.
+- Send iPhone Bot Chat replies through Hermes' durable mailbox to the process that already controls the conversation. Keep the same conversation across compression and read receipts after lost acknowledgements.
+- Require complete device-owned attachments and cancel queued replies without interrupting the current owner. Companion 0.18.0 publishes this feature with the matching iPhone app.
+- Register phone approval support with Hermes before attaching a conversation or submitting a prompt, and register again after a backend reconnect.
+- Preserve approval notifications on older Hermes versions. Decline unsupported server requests explicitly so Hermes does not wait for input the phone cannot provide.
+
 ## 0.16.0
 
 - Track explicitly requested iPhone updates through the signed installer, including the first upgrade from older companions.

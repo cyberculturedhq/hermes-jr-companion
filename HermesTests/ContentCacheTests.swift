@@ -104,6 +104,41 @@ final class ContentCacheTests: XCTestCase {
         XCTAssertNil(cache.load(first).profiles)
     }
 
+    func testConversationCacheKeepsLatestRowsWithoutRuntimeOrPhotoData() {
+        let photo = DraftPhoto(data: Data([1, 2, 3]), filename: "photo.jpg")
+        let rows = (0..<230).map {
+            ChatMessage(id: "\($0)", role: "assistant", text: "Message \($0)", isStreaming: true, photos: [photo])
+        }
+        let cached = ContentCache.conversationRows(rows)
+        XCTAssertEqual(cached.count, 200)
+        XCTAssertEqual(cached.first?.id, "30")
+        XCTAssertEqual(cached.last?.id, "229")
+        XCTAssertTrue(cached.allSatisfy { !$0.isStreaming && $0.photos.isEmpty })
+        XCTAssertTrue(rows.allSatisfy { $0.isStreaming && $0.photos == [photo] })
+    }
+
+    func testConversationCacheEnforcesEncodedByteLimit() throws {
+        let rows = (0..<200).map {
+            ChatMessage(id: "\($0)", role: "assistant", text: String(repeating: "\"é\n", count: 20_000))
+        }
+        let cached = ContentCache.conversationRows(rows)
+        XCTAssertFalse(cached.isEmpty)
+        XCTAssertLessThan(cached.count, rows.count)
+        XCTAssertEqual(cached, Array(rows.suffix(cached.count)))
+        XCTAssertLessThanOrEqual(try JSONEncoder().encode(cached).count, 750_000)
+        XCTAssertGreaterThan(try JSONEncoder().encode(Array(rows.suffix(cached.count + 1))).count, 750_000)
+    }
+
+    func testConversationCacheAcceptsExactByteLimitAndRejectsOversizedLatestRow() throws {
+        var row = ChatMessage(id: "latest", role: "assistant", text: "")
+        let overhead = try JSONEncoder().encode([row]).count
+        row.text = String(repeating: "x", count: 750_000 - overhead)
+        XCTAssertEqual(try JSONEncoder().encode([row]).count, 750_000)
+        XCTAssertEqual(ContentCache.conversationRows([row]), [row])
+        row.text.append("x")
+        XCTAssertTrue(ContentCache.conversationRows([ChatMessage(id: "older", role: "user", text: "Keep reading order"), row]).isEmpty)
+    }
+
     func testOfflineRestorationAllowsReadingButNotSendingAndRemovalClearsCache() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let key = "hermes.connection.settings.v1"
@@ -155,6 +190,42 @@ final class ContentCacheTests: XCTestCase {
         store.backToBots()
         XCTAssertNil(store.selectedProfile)
         XCTAssertFalse(store.isLoadingMessages)
+    }
+
+    func testLeavingConversationClearsHistoryPagination() async {
+        let profile = BotProfile(id: "research", displayName: "Research", summary: "", model: "", isGatewayRunning: true)
+        for destination in ["sessions", "bots", "profile"] {
+            let store = AppStore()
+            store.selectedProfile = profile
+            store.selectedSession = HermesSession(id: "old", title: "Old", preview: "", lastActive: .now, messageCount: 80, source: "cli")
+            store.messages = (0..<80).map { ChatMessage(id: "\($0)", role: "assistant", text: "Message \($0)") }
+            store.messageWindowStart = 40
+            store.hasOlderMessages = true
+            store.isLoadingOlderMessages = true
+            switch destination {
+            case "sessions": store.backToSessions()
+            case "bots": store.backToBots()
+            default: await store.selectProfile(profile, refresh: false)
+            }
+            XCTAssertEqual(store.messageWindowStart, 0, destination)
+            XCTAssertFalse(store.hasOlderMessages, destination)
+            XCTAssertFalse(store.isLoadingOlderMessages, destination)
+            store.messages = [ChatMessage(id: "new", role: "user", text: "New conversation")]
+            XCTAssertEqual(store.visibleWindowMessages.map(\.id), ["new"], destination)
+        }
+    }
+
+    func testCanceledProfileSelectionDoesNotReplaceDestination() async {
+        let store = AppStore()
+        let profile = BotProfile(id: "research", displayName: "Research", summary: "", model: "", isGatewayRunning: true)
+        let current = BotProfile(id: "current", displayName: "Current", summary: "", model: "", isGatewayRunning: true)
+        store.selectedProfile = current
+        store.isLoadingOlderMessages = true
+        let selection = Task { await store.selectProfile(profile, refresh: false) }
+        selection.cancel()
+        await selection.value
+        XCTAssertEqual(store.selectedProfile, current)
+        XCTAssertTrue(store.isLoadingOlderMessages, "A canceled selection must not invalidate the current history load.")
     }
 
     func testStatusUsesLastSuccessfulRefreshTime() {

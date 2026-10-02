@@ -49,6 +49,22 @@ final class ContentCache {
         } catch { /* A cache failure must not break a live conversation. */ }
     }
     func remove(_ settings: ConnectionSettings) { try? FileManager.default.removeItem(at: file(settings)) }
+
+    static func conversationRows(_ rows: [ChatMessage]) -> [ChatMessage] {
+        let encoder = JSONEncoder()
+        var result: [ChatMessage] = []
+        var remainingBytes = 750_000 - 2 // JSON array brackets.
+        for var row in rows.suffix(200).reversed() {
+            row.isStreaming = false
+            row.photos = []
+            guard let size = try? encoder.encode(row).count else { break }
+            let required = size + (result.isEmpty ? 0 : 1) // Comma between rows.
+            guard required <= remainingBytes else { break }
+            result.append(row)
+            remainingBytes -= required
+        }
+        return result.reversed()
+    }
 }
 
 enum ContentRefreshPhase { case idle, connecting, checking, unavailable, failed }

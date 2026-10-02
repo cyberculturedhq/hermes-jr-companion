@@ -82,6 +82,13 @@ requires simulator signing for Keychain access. See `Protocol/SETUP.md`.
 
 ## Mobile protocol compatibility
 
+`Validation/approval_runtime.py` runs the production companion socket against a
+clean Hermes checkout's real approval registry over disposable loopback
+WebSockets. Run it with Hermes' Python and the checkout path. It reproduces
+refusal before capability registration, then checks explicit Allow once/Deny,
+registration after reconnect, and rejection of unsupported input requests. No
+model or shell command runs, and no existing Hermes service or pairing is used.
+
 The app negotiates the companion's versioned mobile API on each connection and
 caches its feature descriptor by pinned installation identity. The companion's
 adapter normalizes old/new Hermes requests; the phone continues using v1.

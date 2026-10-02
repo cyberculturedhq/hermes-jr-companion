@@ -4,11 +4,12 @@ import asyncio
 import json
 import os
 import re
+import uuid
 from urllib.parse import urlsplit
 import aiohttp
 from .api import PREFIX, handle
 from .service import read_bounded
-from .mobile import MobileAdapter, PREFIX as MOBILE_PREFIX
+from .mobile import MobileAdapter, PREFIX as MOBILE_PREFIX, unsupported_requests
 
 RPC_METHODS = frozenset({
     "gateway.ping", "profiles.list", "profiles.get_asset", "session.create", "session.resume",
@@ -20,6 +21,7 @@ RPC_METHODS = frozenset({
 HTTP_PATH = re.compile(r"/api/(?:profiles|sessions|sessions/[A-Za-z0-9_.:-]+(?:/(?:messages|latest-descendant))?)\Z")
 QUERY_KEYS = frozenset({"profile", "order", "limit", "offset", "source", "search", "include_sessions"})
 MAX_MESSAGE = 4_000_000
+CAPABILITY_TIMEOUT = 10
 
 
 def dashboard_url(value):
@@ -41,9 +43,10 @@ def validate_rpc(frame):
     params = frame.get("params", {})
     if not isinstance(params, dict):
         raise ValueError("RPC parameters must be an object")
-    if name == "config.get" and params.get("key") not in {"profile", "model", "reasoning", "provider", "reasoning_effort"}:
+    key = params.get("key")
+    if name == "config.get" and (not isinstance(key, str) or key not in {"profile", "model", "reasoning", "provider", "reasoning_effort"}):
         raise ValueError("Configuration key is not allowed")
-    if name == "config.set" and params.get("key") not in {"model", "reasoning"}:
+    if name == "config.set" and (not isinstance(key, str) or key not in {"model", "reasoning"}):
         raise ValueError("Configuration key is not allowed")
     if name == "session.create":
         params = {**params, "close_on_disconnect": False}
@@ -148,12 +151,14 @@ class LocalPeer:
         self.lock = asyncio.Lock()
         self.adapter = MobileAdapter()
         self.mobile = False
+        self.capabilities = None
 
     async def send(self, frame):
         frame = validate_rpc(frame)
         async with self.lock:
             if self.ws is None or self.ws.closed:
                 self.adapter = MobileAdapter()
+                self.capabilities = None
                 self.ws = await self.gateway.socket()
                 self.reader = asyncio.create_task(self.read(), name="hermes-jr-local-reader")
             if frame['method'].startswith(MOBILE_PREFIX):
@@ -164,7 +169,35 @@ class LocalPeer:
                     await self.emit({'type': 'rpc', 'body': {'jsonrpc': '2.0', 'id': frame.get('id'),
                                     'error': {'code': -32602, 'message': str(exc)}}})
                     return
+            if self.mobile and self.capabilities is None:
+                await self.advertise_requests()
             await self.ws.send_json(frame)
+
+    async def advertise_requests(self):
+        """Register this backend connection before attaching or submitting a turn."""
+        socket = self.ws
+        rid = 'jr-capabilities:' + uuid.uuid4().hex
+        pending = asyncio.get_running_loop().create_future()
+        self.capabilities = (rid, pending)
+        try:
+            await socket.send_json({'jsonrpc': '2.0', 'id': rid, 'method': 'client.capabilities',
+                                    'params': {'server_requests': True}})
+            response = await asyncio.wait_for(pending, CAPABILITY_TIMEOUT)
+            error = response.get('error')
+            # Older Hermes builds use approval notifications and have no such
+            # method. Only an explicit method-not-found permits that fallback.
+            if error is not None:
+                if not isinstance(error, dict) or error.get('code') != -32601:
+                    raise ConnectionError('Hermes could not register phone approval support')
+            elif not isinstance(response.get('result'), dict):
+                raise ConnectionError('Hermes returned invalid approval capabilities')
+        except (Exception, asyncio.CancelledError) as exc:
+            if not pending.done():
+                pending.cancel()
+            await socket.close()
+            if isinstance(exc, asyncio.TimeoutError):
+                raise ConnectionError('Hermes took too long to register phone approval support') from exc
+            raise
 
     async def read(self):
         socket = self.ws
@@ -172,12 +205,26 @@ class LocalPeer:
             async for message in socket:
                 if message.type == aiohttp.WSMsgType.TEXT:
                     frame = json.loads(message.data)
+                    if not isinstance(frame, dict):
+                        raise ValueError('Invalid Hermes frame')
+                    if socket is self.ws and self.capabilities and frame.get('id') == self.capabilities[0]:
+                        pending = self.capabilities[1]
+                        if not pending.done():
+                            pending.set_result(frame)
+                        continue
                     if self.mobile:
+                        # Advertising server requests also promises to reject
+                        # kinds the phone cannot answer, including replayed ones.
+                        for request in unsupported_requests(frame):
+                            await socket.send_json({'jsonrpc': '2.0', 'id': request['id'],
+                                'error': {'code': -32601, 'message': 'This request is not supported on the phone.'}})
                         frame = self.adapter.incoming(frame)
                     await self.emit({"type": "rpc", "body": frame})
         except (aiohttp.ClientError, ValueError, ConnectionError):
             pass
         finally:
+            if socket is self.ws and self.capabilities and not self.capabilities[1].done():
+                self.capabilities[1].set_exception(ConnectionError('Hermes closed the approval capability connection'))
             if self.mobile and socket is self.ws:
                 await self.emit({'type': 'rpc', 'body': {'jsonrpc': '2.0', 'method': 'jr.backend.disconnected'}})
             await socket.close()
