@@ -120,6 +120,8 @@ async def enroll(request: Request):
         raise HTTPException(413, "Request too large")
     try:
         body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("Expected a JSON object")
         name = body.get("device_name", "iPhone")
         if not isinstance(name, str) or not 1 <= len(name) <= 80:
             raise ValueError("Invalid device name")

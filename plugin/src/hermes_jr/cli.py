@@ -148,7 +148,7 @@ async def execute(args):
             try:
                 await service.delete_device(device_id)
                 state.deleted_remotely(device_id)
-            except (ValueError, aiohttp.ClientError):
+            except (ValueError, aiohttp.ClientError, asyncio.TimeoutError, TimeoutError):
                 raise ValueError("Device revoked locally. Service unavailable; the running companion will retry removal automatically") from None
             print("Device revoked and its local follows and notification references removed.")
         elif args.jr_command == "devices":
@@ -186,7 +186,7 @@ def dispatch(args):
         asyncio.run(execute(args))
     except (ValueError, PermissionError) as exc:
         raise SystemExit(str(exc)) from None
-    except (KeyError, aiohttp.ClientError):
+    except (KeyError, aiohttp.ClientError, asyncio.TimeoutError, TimeoutError):
         # Full network exceptions may include the local WebSocket authorization query.
         raise SystemExit("Companion service request failed. Check the service configuration; run hermes jr status for non-secret settings.") from None
 

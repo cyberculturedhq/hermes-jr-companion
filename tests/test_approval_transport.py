@@ -160,6 +160,41 @@ class ApprovalTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(socket.advertised)
         self.assertEqual(len(socket.sent), 1)
 
+    async def test_invalid_interaction_id_returns_error_and_next_request_succeeds(self):
+        socket = Socket()
+        peer, delivered = self.peer(socket)
+        for request_id in ([], {}, None, 1):
+            with self.subTest(request_id=request_id):
+                await peer.send(rpc('approval.respond', {'session_id': 'live',
+                    'request_id': request_id, 'choice': 'deny'}, 'invalid'))
+                frame = (await asyncio.wait_for(delivered.get(), 1))['body']
+                self.assertEqual(frame['id'], 'invalid')
+                self.assertEqual(frame['error']['code'], -32602)
+                self.assertFalse(socket.sent)
+        await peer.send(rpc('gateway.ping', rid='valid'))
+        self.assertEqual([f['method'] for f in socket.sent], ['client.capabilities', 'gateway.ping'])
+        self.assertFalse(socket.closed)
+
+    async def test_invalid_question_id_does_not_disconnect_or_answer_clarification(self):
+        socket = Socket()
+        peer, delivered = self.peer(socket)
+        await peer.send(rpc('session.resume', {'session_id': 'live'}))
+        await socket.frames.put({'jsonrpc': '2.0', 'id': 'questions', 'method': 'clarify',
+            'params': {'session_id': 'live', 'questions': [{'qid': 'q1', 'question': 'Which?'}]}})
+        card = (await asyncio.wait_for(delivered.get(), 1))['body']['params']['payload']
+        params = {'session_id': 'live', 'request_id': card['request_id'], 'answer': 'First'}
+        for question_id in ([], {}, None, 1):
+            with self.subTest(question_id=question_id):
+                await peer.send(rpc('clarify.respond', {**params, 'question_id': question_id}, 'invalid'))
+                error = (await asyncio.wait_for(delivered.get(), 1))['body']
+                self.assertEqual(error['error']['code'], -32602)
+                self.assertEqual(len(socket.sent), 2)
+        await peer.send(rpc('clarify.respond', {**params, 'question_id': 'q1'}, 'answer'))
+        self.assertEqual(socket.sent[-1]['method'], 'clarify.lock')
+        self.assertEqual(socket.sent[-1]['params'], {
+            'request_id': 'questions', 'question_id': 'q1', 'answer': 'First'})
+        self.assertFalse(socket.closed)
+
     async def test_unsupported_live_requests_are_rejected_without_input_leaking(self):
         for kind in ('sudo', 'secret', 'new-sensitive-prompt'):
             with self.subTest(kind=kind):

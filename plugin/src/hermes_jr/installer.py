@@ -249,6 +249,14 @@ def install(state, release, *, receipt_id=None):
                 verify_connection(state)
             snapshot.complete()
         except BaseException:
+            if snapshot.journal['phase'] == 'prepared':
+                if previous_pointer:
+                    write_json(pointer, previous_pointer)
+                else:
+                    pointer.unlink(missing_ok=True)
+                if manager_state['manager_active']:
+                    manager.start()
+                raise ValueError('Update stopped before replacing files; installed code was left unchanged') from None
             try:
                 manager.stop()
                 with lock(state.directory / 'bridge.lock'):
@@ -285,6 +293,7 @@ def rollback(state):
         manager.stop()
         try:
             with lock(state.directory / 'bridge.lock'):
+                snapshot.ensure_unchanged('after')
                 disable_active(profiles, snapshot.journal['log'])
                 snapshot.restore(check_current=False)
                 enable_homes(active, snapshot.journal['log'])

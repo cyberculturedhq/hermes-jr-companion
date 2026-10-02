@@ -59,12 +59,17 @@ def attachments(state, device_id, values):
             raise ValueError('Invalid attachment filename')
         target = root / upload_id / filename
         resolved = target.resolve()
-        if (not resolved.is_relative_to(root) or target.is_symlink()
-                or not stat.S_ISREG(target.stat().st_mode) or not 0 < target.stat().st_size <= 25 * 1024 * 1024):
+        if not resolved.is_relative_to(root) or target.is_symlink():
+            raise ValueError('Attachment is unavailable')
+        try:
+            info = target.stat()
+        except FileNotFoundError:
+            raise ValueError('Attachment is unavailable') from None
+        if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= 25 * 1024 * 1024:
             raise ValueError('Attachment is unavailable')
         # Upload completion is recorded by the uploader. Partial files cannot enter a turn.
         complete = state.get('upload-complete/' + hashlib.sha256(device_id.encode()).hexdigest() + '/' + upload_id + '/' + filename)
-        if not isinstance(complete, dict) or complete.get('size') != target.stat().st_size:
+        if not isinstance(complete, dict) or complete.get('size') != info.st_size:
             raise ValueError('Attachment upload is incomplete')
         paths.append(str(resolved))
     return paths

@@ -37,7 +37,8 @@ class MobileProtocolTests(unittest.TestCase):
 
     def test_mobile_namespace_does_not_expand_remote_permissions(self):
         for method, params in [('shell.exec', {}), ('config.get', {'key': 'full'}),
-                               ('config.set', {'key': 'api_key', 'value': 'x'})]:
+                               ('config.set', {'key': 'api_key', 'value': 'x'}),
+                               ('config.get', {'key': []}), ('config.set', {'key': {}})]:
             with self.assertRaises(ValueError):
                 validate_rpc(request(method, params))
         with self.assertRaises(ValueError):

@@ -63,6 +63,19 @@ class UpdateRequestTests(unittest.IsolatedAsyncioTestCase):
             self.state.enqueue('default', 'session-1', 'completed', 'later-turn')
             self.assertEqual(len(self.state.outbox()), 2)
 
+    def test_update_suppression_preserves_older_queued_replies_and_clock_tolerance(self):
+        now = time.time()
+        self.state.follow(self.device, 'default', 'session-1')
+        with patch('hermes_jr.state.time.time', return_value=now - 3600):
+            self.state.enqueue('default', 'session-1', 'completed', 'earlier-turn')
+        # The receipt permits the phone clock to run up to five minutes ahead.
+        self.receipt['created'] = now + 300
+        updates.register(self.state, self.receipt)
+        self.state.enqueue('default', 'session-1', 'completed', 'update-turn')
+        self.assertEqual([event['event_key'] for event in self.state.outbox()], ['earlier-turn'])
+        updates.complete(self.state, self.receipt['id'], '0.16.0')
+        self.assertEqual([event['kind'] for event in self.state.outbox()], ['completed', 'update_completed'])
+
     def test_completion_respects_opt_out_and_revocation(self):
         for mode in ['receipt', 'host', 'device', 'revoked']:
             with self.subTest(mode=mode):

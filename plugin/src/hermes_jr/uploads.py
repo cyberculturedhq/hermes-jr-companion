@@ -11,7 +11,10 @@ CHUNK_BYTES = 512 * 1024
 
 
 def upload(state, device_id, body):
-    upload_id = str(uuid.UUID(body.get("upload_id", "")))
+    upload_id = body.get("upload_id")
+    if not isinstance(upload_id, str):
+        raise ValueError("Invalid upload ID")
+    upload_id = str(uuid.UUID(upload_id))
     filename = body.get("filename")
     offset, total = body.get("offset"), body.get("total")
     if not isinstance(filename, str) or not filename or len(filename.encode()) > 200:
@@ -31,11 +34,15 @@ def upload(state, device_id, body):
         raise ValueError("Invalid chunk size")
     owner = hashlib.sha256(device_id.encode()).hexdigest()
     directory = state.directory / "uploads" / owner / upload_id
-    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if offset == 0:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     target = directory / filename
     # Exclusive creation and exact offsets prevent retries from duplicating bytes.
     flags = os.O_WRONLY | os.O_NOFOLLOW | (os.O_CREAT | os.O_EXCL if offset == 0 else 0)
-    fd = os.open(target, flags, 0o600)
+    try:
+        fd = os.open(target, flags, 0o600)
+    except (FileExistsError, FileNotFoundError):
+        raise ValueError("Upload does not match an unfinished file") from None
     with os.fdopen(fd, "r+b") as output:
         output.seek(0, os.SEEK_END)
         if output.tell() != offset:

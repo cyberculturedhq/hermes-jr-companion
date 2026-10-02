@@ -130,6 +130,30 @@ class InstallerTests(unittest.TestCase):
             installer.install(self.state, self.release)
         self.assert_restored()
 
+    def test_preflight_race_preserves_user_edits_without_rollback(self):
+        manifest = self.profiles[0][1] / 'plugin.yaml'
+        self.manager.stop.side_effect = lambda: manifest.write_text('user edit during preparation')
+        with self.assertRaisesRegex(ValueError, 'left unchanged'):
+            installer.install(self.state, self.release)
+        self.assertEqual(manifest.read_text(), 'user edit during preparation')
+        self.assertEqual(self.active, [self.homes[0]])
+        self.assertEqual(self.selected, '0.3.0')
+        self.assertFalse(any(event[0] in {'disable', 'enable'} for event in self.events))
+        self.assertFalse((self.state.directory / 'last-update.json').exists())
+        self.manager.start.assert_called_once()
+
+    def test_rollback_rechecks_user_edits_after_stopping_service(self):
+        installer.install(self.state, self.release)
+        self.events.clear()
+        manifest = self.profiles[0][1] / 'plugin.yaml'
+        self.manager.stop.side_effect = lambda: manifest.write_text('user edit during rollback')
+        with self.assertRaisesRegex(ValueError, 'Rollback could not finish'):
+            installer.rollback(self.state)
+        self.assertEqual(manifest.read_text(), 'user edit during rollback')
+        self.assertEqual(self.active, [self.homes[0]])
+        self.assertEqual(self.selected, '0.4.0')
+        self.assertFalse(any(event[0] in {'disable', 'enable'} for event in self.events))
+
     def test_all_disabled_copies_stop_before_source_replacement(self):
         self.active.clear()
         with self.assertRaisesRegex(ValueError, 'No Hermes Jr profile is enabled'):
