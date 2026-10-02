@@ -74,7 +74,7 @@ async def main():
                     resolved = server_requests.resolve_response({'id': params['id'], 'result': params['result']})
                     result = {'status': 'ok' if resolved else 'expired'}
                 elif 'error' in frame:
-                    assert server_requests.resolve_response(frame, transport)
+                    assert server_requests.resolve_response(frame)
                     continue
                 else:
                     raise AssertionError(frame)
