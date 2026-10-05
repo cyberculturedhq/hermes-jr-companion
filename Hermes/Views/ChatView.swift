@@ -117,7 +117,7 @@ struct ChatView: View {
         return ""
     }
 
-    var body: some View {
+    private var conversationContent: some View {
         let visibleMessages = self.visibleMessages
         let lastUserID = visibleMessages.last(where: { $0.role == "user" })?.id
         let hasUnread = store.selectedProfile.map {
@@ -166,6 +166,10 @@ struct ChatView: View {
         .onAppear { canAnimateSends = true }
         .background(Color(uiColor: .systemBackground))
         .background(KeyboardWindowReference(view: keyboardReferenceView).allowsHitTesting(false))
+    }
+
+    private var conversationNavigation: some View {
+        conversationContent
         .modifier(ChatNavigationTitle(botName: botProfile?.name ?? store.selectedProfile?.name ?? "Hermes",
                                       sessionTitle: sessionTitle, status: conversationStatus, activity: headerActivity))
         .navigationBarTitleDisplayMode(.inline)
@@ -193,6 +197,10 @@ struct ChatView: View {
             store.commandDraft = nil
             composerFocused = true
         }
+    }
+
+    private var conversationCommands: some View {
+        conversationNavigation
         .sheet(item: Binding(get: { store.commandResult }, set: { store.commandResult = $0 })) { result in
             NavigationStack {
                 ScrollView {
@@ -220,6 +228,10 @@ struct ChatView: View {
         } message: {
             Text(store.pendingCommandConfirmation?.message ?? "")
         }
+    }
+
+    private var conversationAttachments: some View {
+        conversationCommands
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
             guard let window = keyboardReferenceView.window,
                   let screen = window.windowScene?.screen,
@@ -240,6 +252,10 @@ struct ChatView: View {
         .onChange(of: selectedPhotos) { _, selection in
             Task { await loadPhotos(selection) }
         }
+    }
+
+    private var conversationPrompts: some View {
+        conversationAttachments
         .sheet(isPresented: Binding(get: { hasPendingPrompt }, set: { _ in })) {
             NavigationStack {
                 Group {
@@ -274,6 +290,10 @@ struct ChatView: View {
             }
             .interactiveDismissDisabled()
         }
+    }
+
+    var body: some View {
+        conversationPrompts
         .safeAreaInset(edge: .top) {
             if let progress = store.selectedUpdateProgress, ["failed", "unconfirmed"].contains(progress.status) {
                 VStack(alignment: .leading, spacing: 8) {
