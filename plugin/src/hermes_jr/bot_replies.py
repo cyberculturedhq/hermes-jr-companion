@@ -93,6 +93,8 @@ def submit(state, device_id, request_id, profile, session_id, body):
     # only retry the same pinned owner and mailbox ID.
     with state.connect() as db:
         db.execute('BEGIN IMMEDIATE')
+        from .storage import require_device
+        require_device(db, device_id)
         row = db.execute('SELECT value FROM settings WHERE key=?', (record_key,)).fetchone()
         if row:
             record = json.loads(row[0])

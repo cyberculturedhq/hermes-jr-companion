@@ -92,6 +92,15 @@ class BotReplyTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.submit({**self.body, 'text': 'Different'})
         self.assertEqual(len(self.admissions), 1)
 
+    def test_revocation_blocks_a_retry_before_mailbox_admission(self):
+        self.delivery.deliver_to_live_owner.side_effect = OSError('Admission interrupted')
+        with self.assertRaises(OSError): self.submit()
+        self.state.revoke(self.phone)
+        self.delivery.deliver_to_live_owner.side_effect = self.admit
+        with self.assertRaises(PermissionError): self.submit()
+        self.assertFalse(self.admissions)
+        self.assertIsNotNone(self.state.get(b.key(self.phone, self.id)))
+
     def test_missing_owner_uses_the_same_session_without_mailbox_admission(self):
         self.delivery.find_canonical_owner.return_value = None
         result = self.submit()
