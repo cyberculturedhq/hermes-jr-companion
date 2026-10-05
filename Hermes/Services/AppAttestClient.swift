@@ -10,13 +10,49 @@ protocol AppVerifying {
 extension AppVerifying { func didIssueTicket(service: String) throws {} }
 
 @MainActor
+protocol DeviceAppAttesting {
+    var isSupported: Bool { get }
+    func generateKey() async throws -> String
+    func attestKey(_ key: String, clientDataHash: Data) async throws -> Data
+    func generateAssertion(_ key: String, clientDataHash: Data) async throws -> Data
+}
+
+@MainActor
+private struct AppleAppAttester: DeviceAppAttesting {
+    private let service = DCAppAttestService.shared
+    var isSupported: Bool { service.isSupported }
+    func generateKey() async throws -> String { try await service.generateKey() }
+    func attestKey(_ key: String, clientDataHash: Data) async throws -> Data {
+        try await service.attestKey(key, clientDataHash: clientDataHash)
+    }
+    func generateAssertion(_ key: String, clientDataHash: Data) async throws -> Data {
+        try await service.generateAssertion(key, clientDataHash: clientDataHash)
+    }
+}
+
+@MainActor
 final class AppAttestClient: AppVerifying {
     private struct SavedKey: Codable { let id: String; var attested: Bool }
     private struct PendingProof: Codable { let phoneKey: String; let created: Double; let body: Data }
     private struct PendingChallenge: Codable { let keyID: String; let phoneKey: String; let created: Double; let challenge: String }
-    private let attest = DCAppAttestService.shared
+    private let attest: any DeviceAppAttesting
+
+    init(attest: (any DeviceAppAttesting)? = nil) { self.attest = attest ?? AppleAppAttester() }
 
     func proof(service: String, phoneKey: String, network: any SetupNetworking) async throws -> Data {
+        do { return try await buildProof(service: service, phoneKey: phoneKey, network: network) }
+        catch {
+            let failure = error as NSError
+            guard failure.domain == DCErrorDomain, failure.code == DCError.Code.invalidKey.rawValue else { throw error }
+            // A reinstall can retain the identifier after Apple removes the hardware key.
+            // Retry once with a new key. Keep existing keys on temporary Apple failures.
+            CredentialStore.delete(account: "app-attest/" + service)
+            try didIssueTicket(service: service)
+            return try await buildProof(service: service, phoneKey: phoneKey, network: network)
+        }
+    }
+
+    private func buildProof(service: String, phoneKey: String, network: any SetupNetworking) async throws -> Data {
         guard attest.isSupported else {
             throw HermesError.message("This device cannot verify the official app for new setup. Use a supported iPhone or iPad. Existing connections remain available.")
         }

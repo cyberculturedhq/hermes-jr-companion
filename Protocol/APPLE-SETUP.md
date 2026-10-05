@@ -16,6 +16,8 @@ The relay validates Apple's certificate chain, app identity, environment, challe
 
 Apple verification runs automatically before the app creates a setup ticket. The user keeps the existing numeric comparison. An unsupported device cannot start new public setup. An Apple outage leaves existing connections available. New setup stops and can retry.
 
+If Apple reports `invalidKey`, the app replaces the saved key and retries once. A repeated key error stops setup. A temporary `serverUnavailable` error keeps the same key and challenge digest. This avoids unnecessary key creation during an outage. See [Apple app integrity guidance](https://developer.apple.com/documentation/devicecheck/establishing-your-app-s-integrity).
+
 ## Push notifications
 
 Set `APNS_TEAM_ID`, `APNS_KEY_ID`, `APNS_TOPIC`, and `APNS_PRIVATE_KEY` as private Worker secrets. A restricted production key can use `APNS_PRODUCTION_KEY_ID` and `APNS_PRODUCTION_PRIVATE_KEY`. Set `APNS_ENVIRONMENT` to the allowed environment. App Attest and APNs keys can have different capabilities. A push key alone does not establish DeviceCheck access.
