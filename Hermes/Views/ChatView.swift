@@ -125,48 +125,7 @@ struct ChatView: View {
         } ?? false
         return ZStack(alignment: .bottom) {
             ScrollViewReader { proxy in
-                ScrollView {
-                    // The bounded window stays eager so a very tall bubble
-                    // never changes its estimated height while scrolling.
-                    VStack(alignment: .leading, spacing: 0) {
-                        transcriptRows(visibleMessages, lastUserID: lastUserID, hasUnread: hasUnread, using: proxy)
-                    }
-                    .scrollTargetLayout()
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 12)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { conversationHeight = $0 }
-                }
-                .contentMargins(.bottom, composerHeight, for: .scrollContent)
-                .opacity(initialTranscriptPositioned ? 1 : 0)
-                .allowsHitTesting(initialTranscriptPositioned)
-                .overlay {
-                    if !initialTranscriptPositioned && botProfile == nil {
-                        ProgressView("Opening conversation…")
-                            .padding(.bottom, composerHeight)
-                    }
-                }
-                .accessibilityIdentifier("chat.transcript")
-                .scrollDismissesKeyboard(.interactively)
-                .onScrollGeometryChange(for: Bool.self) { geometry in
-                    geometry.contentSize.height + geometry.contentInsets.bottom
-                        - geometry.contentOffset.y - geometry.containerSize.height <= 80
-                } action: { _, atBottom in
-                    viewportIsAtBottom = atBottom
-                    // Content growth must not disable following an active reply.
-                    if isUserScrolling { isAtBottom = atBottom }
-                }
-                .onScrollPhaseChange { _, phase in
-                    let wasScrolling = isUserScrolling
-                    isUserScrolling = phase == .tracking || phase == .interacting || phase == .decelerating
-                    if wasScrolling && !isUserScrolling { isAtBottom = viewportIsAtBottom }
-                }
-                .onGeometryChange(for: CGSize.self) { $0.size } action: {
-                    conversationWidth = $0.width
-                    viewportHeight = $0.height
-                }
-                .defaultScrollAnchor(.bottom, for: .initialOffset)
-                .defaultScrollAnchor(isAtBottom ? .bottom : .top, for: .sizeChanges)
-                .defaultScrollAnchor(.top, for: .alignment)
+                transcriptViewport(visibleMessages, lastUserID: lastUserID, hasUnread: hasUnread, using: proxy)
                 .onChange(of: store.sessionReady) { _, ready in
                     guard ready else { return }
                     if !initialTranscriptPositioned {
@@ -359,6 +318,57 @@ struct ChatView: View {
         } message: {
             Text((store.errorMessage ?? "").components(separatedBy: "\nDetails:").first ?? "")
         }
+    }
+
+    private func transcriptContent(_ visibleMessages: [ChatMessage], lastUserID: String?,
+                                   hasUnread: Bool, using proxy: ScrollViewProxy) -> some View {
+        ScrollView {
+            // The bounded window stays eager so a very tall bubble
+            // never changes its estimated height while scrolling.
+            VStack(alignment: .leading, spacing: 0) {
+                transcriptRows(visibleMessages, lastUserID: lastUserID, hasUnread: hasUnread, using: proxy)
+            }
+            .scrollTargetLayout()
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { conversationHeight = $0 }
+        }
+        .contentMargins(.bottom, composerHeight, for: .scrollContent)
+        .opacity(initialTranscriptPositioned ? 1 : 0)
+        .allowsHitTesting(initialTranscriptPositioned)
+        .overlay {
+            if !initialTranscriptPositioned && botProfile == nil {
+                ProgressView("Opening conversation…")
+                    .padding(.bottom, composerHeight)
+            }
+        }
+        .accessibilityIdentifier("chat.transcript")
+        .scrollDismissesKeyboard(.interactively)
+    }
+
+    private func transcriptViewport(_ visibleMessages: [ChatMessage], lastUserID: String?,
+                                    hasUnread: Bool, using proxy: ScrollViewProxy) -> some View {
+        transcriptContent(visibleMessages, lastUserID: lastUserID, hasUnread: hasUnread, using: proxy)
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.contentSize.height + geometry.contentInsets.bottom
+                - geometry.contentOffset.y - geometry.containerSize.height <= 80
+        } action: { (_: Bool, atBottom: Bool) in
+            viewportIsAtBottom = atBottom
+            // Content growth must not disable following an active reply.
+            if isUserScrolling { isAtBottom = atBottom }
+        }
+        .onScrollPhaseChange { _, phase in
+            let wasScrolling = isUserScrolling
+            isUserScrolling = phase == .tracking || phase == .interacting || phase == .decelerating
+            if wasScrolling && !isUserScrolling { isAtBottom = viewportIsAtBottom }
+        }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: {
+            conversationWidth = $0.width
+            viewportHeight = $0.height
+        }
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(isAtBottom ? .bottom : .top, for: .sizeChanges)
+        .defaultScrollAnchor(.top, for: .alignment)
     }
 
     @ViewBuilder
