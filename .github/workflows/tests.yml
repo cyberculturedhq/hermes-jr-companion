@@ -35,3 +35,51 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+  ios:
+    name: iOS and shared protocol
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+      - name: Install companion fixture dependencies
+        run: python -m pip install .
+      - name: Check Swift and Python encryption interoperability
+        run: python Protocol/tests/test_interop.py
+      - name: Check isolated push fixture
+        run: python -m unittest discover -s Validation -p 'test_real_push_fixture.py'
+      - name: Select an available iPhone simulator
+        run: |
+          python - <<'PY'
+          import json, os, subprocess
+          from pathlib import Path
+          devices = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '--json']))['devices']
+          runtimes = sorted((r for r in devices if '.iOS-' in r),
+                            key=lambda r: tuple(map(int, r.rsplit('iOS-', 1)[1].split('-'))), reverse=True)
+          for runtime in runtimes:
+              phone = next((d for d in devices[runtime] if d['name'].startswith('iPhone') and d.get('isAvailable')), None)
+              if phone:
+                  with Path(os.environ['GITHUB_ENV']).open('a') as output:
+                      output.write('IOS_SIMULATOR_ID=' + phone['udid'] + '\n')
+                  break
+          else:
+              raise SystemExit('No available iPhone simulator was found')
+          PY
+      - name: Run iOS app tests with simulator signing
+        run: |
+          xcodebuild test -project Hermes.xcodeproj -scheme Hermes -configuration Debug \
+            -destination "platform=iOS Simulator,id=$IOS_SIMULATOR_ID" \
+            -derivedDataPath build/ios -resultBundlePath build/ios-tests.xcresult \
+            DEVELOPMENT_TEAM= CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES
+      - name: Save iOS test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ios-tests
+          path: build/ios-tests.xcresult
+          if-no-files-found: ignore
+          retention-days: 5

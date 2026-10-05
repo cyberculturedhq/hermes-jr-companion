@@ -22,11 +22,40 @@ node_modules/
 *.mobileprovision
 *.xcarchive
 
-dist/
-coverage/
-*.sqlite3*
-*.sqlite*
-*.db
-bridge.lock
+# Credentials and signing material
+*.p12
+*.pfx
 *.pem
 *.key
+*.keystore
+*.jks
+.netrc
+credentials.json
+service-account*.json
+
+# Generated artifacts and local runtime state
+dist/
+coverage/
+*.ipa
+*.dSYM/
+*.xcresult/
+*.log
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+*.db
+*.db-*
+*.zip
+
+# Local publishing mirrors, review exports, and private rollout records
+/Publishing/
+/UXReview/
+/Audit/
+/Validation/*.png
+/Validation/OnboardingVideo-*/
+/Validation/GuidedUpdates-*/
+/Validation/*-20*.md
+/Validation/VM-PAIRING-ROLLOUT.md
+
+bridge.lock

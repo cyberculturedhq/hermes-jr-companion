@@ -12,7 +12,7 @@ import sys
 parser = argparse.ArgumentParser()
 parser.add_argument('upstream', type=Path)
 root = Path(__file__).resolve().parents[1]
-parser.add_argument('--companion', type=Path, default=root / ('Companion' if (root / 'Companion').exists() else 'plugin'))
+parser.add_argument('--companion', type=Path, default=root / 'plugin')
 args = parser.parse_args()
 upstream = args.upstream.resolve()
 assert not (upstream / '.env').exists(), 'Use a clean checkout without credentials'
