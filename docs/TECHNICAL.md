@@ -16,7 +16,7 @@ Python 3.10+, macOS or Linux, and a Hermes version providing native plugin hooks
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install -e ./plugin
+.venv/bin/python -m pip install -e .
 .venv/bin/python -m unittest discover -s tests -v
 ```
 

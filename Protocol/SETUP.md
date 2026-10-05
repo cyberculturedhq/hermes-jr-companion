@@ -193,9 +193,9 @@ Wrangler; use `.dev.vars` only for local development. Deploy the `v3-setup`
 Durable Object migration alongside the service. The iOS app and updated companion
 must be released together with service support. The companion service owns the exchange. From companion 0.15.0, `pair --ticket` requires a loaded native question integration. Its subprocess hands off to the plugin, which displays the code in the originating CLI/TUI or desktop conversation and waits for authenticated connection. The panel dismisses automatically; a local response cancels this unfinished attempt and never approves. A short-lived, process-bound lease associates the subprocess with its panel. It is not pairing authority; only the phone can confirm. Restart loaded Hermes processes after installation or update. Existing phone connections remain compatible. Only `connected` indicates success; expiry and failure exit nonzero. Numeric comparison is the only supported new pairing flow.
 
-In the `hermes-ios` development workspace, run the Python tests, relay tests/typecheck, iOS tests with simulator signing
+In the combined development workspace, run the Python tests, relay tests/typecheck, iOS tests with simulator signing
 enabled (Keychain requires entitlements), and
-`Companion/.venv/bin/python Validation/setup_fixture.py`.
+`.venv/bin/python Validation/setup_fixture.py`.
 The fixture uses real Swift/Python crypto and the local Worker, compares both
 codes through the panel’s local state after checking that CLI output contains no code, restarts the service, completes HPKE, reads only fixture messages,
 and checks cleanup. It uses no production keys or notifications.

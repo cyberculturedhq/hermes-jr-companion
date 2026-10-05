@@ -1,6 +1,17 @@
-# Hermes Jr. Companion
+# Hermes Jr.
 
-The Hermes plugin for **Hermes Jr.**, our iPhone app.
+The native iPhone app, Hermes companion, and encrypted relay service.
+
+This repository contains one maintained implementation of each component. The companion runs on the Hermes computer. The iOS app runs on the phone. Each component keeps its own release version.
+
+| Component | Source | Development guide |
+| --- | --- | --- |
+| iOS app and notification extension | `Hermes/`, `HermesNotificationService/`, `SharedNotifications/` | [Build and use the iOS app](docs/ios.md) |
+| Companion package and native plugin | `plugin/`, `pyproject.toml`, `tests/` | [Companion technical guide](docs/TECHNICAL.md) |
+| Relay and push service | `RelayService/` | [Relay guide](RelayService/README.md) |
+| Shared protocol and integration checks | `Protocol/`, `Validation/` | [Integration checks](Validation/README.md) |
+
+The existing companion repository name, installer path, package name, and release tags remain stable. The former separate iOS repository is retained as historical source. Make new app, companion, and relay changes here.
 
 Connect to your Hermes agent from your phone and get notified when a conversation finishes or needs your attention. The companion runs in the background on your Hermes computer. **Your conversations and notification details are encrypted before they reach our relay.**
 
@@ -15,7 +26,7 @@ Your Hermes computer and paired iPhone handle the private content. Our relay del
 - **Encrypted conversations:** remote access uses end-to-end encryption with a host identity verified by matching codes on both devices. A relay credential alone cannot unlock your agent.
 - **Encrypted notification details:** profile names, conversation titles, and event types are encrypted on your Hermes computer and decrypted on your iPhone. Our relay and Apple’s push servers receive ciphertext and a generic fallback, not those details. Notification payloads are padded to a fixed size.
 - **Keys stay with your devices:** notification keys are stored in the iPhone’s Keychain and the companion’s private local state, never sent to our relay. Phones receive separate keys.
-- **Code you can inspect:** the companion and relay are open source. You can review them, fork them, or host the service yourself. The iOS source will also be published.
+- **Code you can inspect:** the companion and relay are open source. You can review them, fork them, or host the service yourself. The iOS source is included in this repository.
 
 Encryption does not hide everything: the delivery services still see network/delivery metadata, random routing identifiers, and push tokens. Decrypted previews are visible to iOS and follow your lock-screen notification settings. Your Hermes model provider still processes the requests you send to it.
 
@@ -45,7 +56,7 @@ Your Hermes computer needs to be awake, with its Hermes dashboard running. The a
 
 ## Make it your own
 
-You're welcome to fork this companion, adapt it for your own app, and host your own service. We also plan to publish the Hermes Jr. iOS source so you can build or customize the app yourself.
+You're welcome to fork this companion, adapt it for your own app, and host your own service. You can also build or customize the included iOS app.
 
 Start with the [developer guide](docs/TECHNICAL.md) and [self-hosting instructions](RelayService/README.md). Your own iOS app needs its own push configuration; see the self-hosting guide.
 

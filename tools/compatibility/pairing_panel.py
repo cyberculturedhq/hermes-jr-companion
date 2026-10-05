@@ -18,7 +18,7 @@ from support import bind_request_sinks
 parser = argparse.ArgumentParser()
 parser.add_argument('upstream', type=Path)
 parser.add_argument('--dependencies', type=Path)
-parser.add_argument('--companion', type=Path, default=Path(__file__).resolve().parents[1] / 'Companion')
+parser.add_argument('--companion', type=Path, default=Path(__file__).resolve().parents[2] / 'plugin')
 args = parser.parse_args()
 assert not (args.upstream / '.env').exists(), 'Use a clean checkout without credentials'
 # A local Hermes Python can have an editable-import fallback to the user's
