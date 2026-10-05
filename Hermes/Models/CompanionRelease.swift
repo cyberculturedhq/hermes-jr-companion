@@ -66,15 +66,11 @@ struct CompanionUpdateReceipt: Codable, Equatable {
     var prompt: String { get throws {
         let receipt = try JSONEncoder().encode(self).companionBase64
         return """
-        Update my Hermes Jr. companion to version \(target) or the latest signed stable release. This is an explicitly requested update, not a repair or a new pairing. Preserve my pairings, profile settings, and other active work. Use the official signed bootstrap so this request gets a verified completion receipt:
+        Update my Hermes Jr. companion to version \(target) or the latest signed stable release. Preserve my pairings, profile settings, and other active work. Use the installed companion updater. Keep this completion receipt:
 
-        set -e
-        jr_update_dir=$(mktemp -d)
-        trap 'rm -rf "$jr_update_dir"' EXIT
-        curl -fsSL https://raw.githubusercontent.com/cyberculturedhq/hermes-jr-companion/main/install.py -o "$jr_update_dir/install.py"
-        python3 "$jr_update_dir/install.py" --update --receipt \(receipt)
+        hermes jr update --install --receipt \(receipt)
 
-        Run the download and installer as one shell operation, stop if the download fails, and remove only that temporary directory afterward. Keep the receipt argument unchanged. Do not substitute an untracked update command. If the installer reports a constraint or failure, report it instead of reinstalling, disconnecting my phone, or changing shared dependencies. A brief Jr. disconnect is expected while the bridge restarts. Do not stop this conversation's Hermes process. Explain any remaining restart needed for already-loaded Hermes hooks, and never claim completion unless the installer verified it.
+        Keep the receipt argument unchanged. Do not download or execute install.py for this installed companion. If --receipt is unavailable, use the installed hermes_jr.update_requests.run_tracked function with the Hermes Python environment and a release verified by the installed hermes_jr.updates.check function. If these installed functions are unavailable, stop and report that a supported manual migration is required. Do not substitute an untracked update command. Report any constraint or failure. Preserve shared dependencies. The bridge can disconnect briefly during restart. Do not stop this conversation's Hermes process. Explain any restart needed for loaded Hermes hooks. Confirm completion only after the installed updater verifies it.
         """
     } }
 }

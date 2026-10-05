@@ -1,84 +1,31 @@
-# Apple signing and push setup
+# Apple service configuration
 
-Hermes Jr. has an explicit App ID with Push Notifications enabled:
+The official bundle identifier is `com.hermesjr.app`. The public Team ID is `56MTG87283`. These identifiers are public configuration. They cannot sign requests or builds.
 
-- Bundle ID: `com.hermesjr.app`
-- Apple Developer team: `56MTG87283`
-- Display name: Hermes Jr.
+Keep Apple `.p8` keys, signing certificates, provisioning profiles, account credentials, and local deployment records outside this repository. The public repository contains only identifiers, entitlement names, public verification certificates, and empty secret examples.
 
-These identifiers are public configuration, not secrets. The project uses this team
-for the owner's build. People building from source select their own development
-team and a unique bundle ID in Xcode. Direct chat and encrypted relay access do not
-depend on our Apple account. Push additionally needs a provider configured for that
-build's topic and environment.
+## App verification
 
-## Provider configuration
+The app uses the `com.apple.developer.devicecheck.appattest-environment` entitlement. Debug uses `development`. Release uses `production`. Enable App Attest for the App ID in the Apple Developer account. Refresh the provisioning profile after this capability change.
 
-The server needs `APNS_TEAM_ID`, `APNS_KEY_ID`, `APNS_TOPIC`, and
-`APNS_PRIVATE_KEY` as Cloudflare Worker secrets. The last value is the full `.p8`
-PKCS#8 PEM private key. It must stay outside source control, the iOS app, and the
-companion distributed to users. The non-secret `APNS_ENVIRONMENT` setting restricts
-which device tokens the service accepts.
+The hosted relay uses `APP_ATTEST_MODE=required`. Set `APP_ATTEST_APP_ID` to the Team ID followed by the bundle identifier. The hosted configuration accepts the production environment. Use a separate private development deployment for development attestations. Do not open development admission on the public hostname.
 
-The staging key `RSZM54525C` is restricted to **Sandbox**, **Topic Specific**, and
-only `com.hermesjr.app`. Its validated P-256 private key is stored outside this
-repository at `~/.local/share/hermes-jr/keys/AuthKey_RSZM54525C.p8` (directory 0700,
-file 0600). Cloudflare staging has the team ID, replacement key ID, topic, and
-private key configured as Worker secrets. The authorized private-key upload
-succeeded, and `/v1/capabilities` reports `push: true`. The unusable first key
-`VH72YT5F94` was revoked after its browser download failed. Storos uses its existing
-Expo provider key, which is unchanged and not required by Hermes Jr.
+Create an Apple server key with DeviceCheck enabled. Store its key ID in `APP_ATTEST_FRAUD_KEY_ID`. Store its private `.p8` content in `APP_ATTEST_FRAUD_PRIVATE_KEY`. Use the private Worker secret store. Do not put either real value in Wrangler configuration, an example file, a build setting, the iOS app, or the companion package.
 
-The separate production key `BS75TM7M28` is restricted to **Production**, **Topic
-Specific**, and `com.hermesjr.app`. Its private file is stored outside the repository
-at `~/.local/share/hermes-jr/keys/AuthKey_BS75TM7M28.p8` (0600). The hosted relay uses
-`APNS_PRODUCTION_KEY_ID` and `APNS_PRODUCTION_PRIVATE_KEY` for production, retains
-the original sandbox secrets, and sets `APNS_ENVIRONMENT=both`. Signing-token caches
-are isolated by key. Actual delivery to the first TestFlight build remains an
-on-device acceptance check; configured credentials alone do not establish delivery.
+The relay validates Apple's certificate chain, app identity, environment, challenge, phone key, and assertion counter. A new key also needs a signed Apple risk receipt. The default `APP_ATTEST_MAX_KEYS=5` limits the approximate count of new app keys on a device in 30 days. Reinstalls and device restores can increase this count. Check false rejections in private staging before public enforcement. Existing connections do not need a fresh Apple request for every operation.
 
-Once an APNs key has been created, Apple allows its private portion to be downloaded
-only once. Keep a protected backup outside this repository.
-An app ID alone does not sign a physical-device build: Xcode must have a valid
-development identity and provisioning profile for the registered device.
+Apple verification runs automatically before the app creates a setup ticket. The user keeps the existing numeric comparison. An unsupported device cannot start new public setup. An Apple outage leaves existing connections available. New setup stops and can retry.
 
-The development Mac has a valid Apple Development signing identity for this
-account. Xcode successfully produced a signed Debug iPhone build with a managed
-provisioning profile at `/tmp/hermes-jr-device/Build/Products/Debug-iphoneos/Hermes.app`.
-The build is installed on the paired iPhone. Real sandbox token registration,
-following the opened fixture conversation, and APNs acceptance (HTTP 200) have
-been verified through staging. The owner confirmed that the notification appeared
-and tapping it opened **Research → Session 0**. The fixture also recorded the app
-resolving the opaque notification reference over the encrypted connection.
+## Push notifications
 
-Debug builds request the APNs sandbox using the `development` entitlement.
-Release builds use `production`. Changing an entitlement without a matching
-provisioning profile does not confer that capability.
+Set `APNS_TEAM_ID`, `APNS_KEY_ID`, `APNS_TOPIC`, and `APNS_PRIVATE_KEY` as private Worker secrets. A restricted production key can use `APNS_PRODUCTION_KEY_ID` and `APNS_PRODUCTION_PRIVATE_KEY`. Set `APNS_ENVIRONMENT` to the allowed environment. App Attest and APNs keys can have different capabilities. A push key alone does not establish DeviceCheck access.
 
-On 22 September 2026, the 0.1.0 (1) archive exported and uploaded successfully to
-App Store Connect app `6814586816` for internal TestFlight only. The exported app's
-signature and profile both have production APNs entitlement, debugging is disabled,
-and the profile permits beta reports. The package includes the UserDefaults privacy
-manifest and declares no non-exempt encryption: cryptography uses Apple's system
-CryptoKit and networking APIs. Apple processing and real-device delivery are separate
-checks from a successful upload.
+Apple permits one private-key download. Keep a protected backup outside the repository. Do not record actual key IDs, private file paths, account details, or device deployment records in public setup documentation.
 
-For the real device check, build and run Hermes Jr. with the registered identifier,
-connect to the companion, and enable notifications in connection details. Open a
-conversation to follow it, put the app in the background, and complete a turn or
-trigger a human approval. Verify the generic alert opens the correct conversation.
-Fixtures and simulator-injected notifications cannot establish actual Apple
-acceptance or delivery.
+## Release checks
 
-## Individual to organization membership
+Release the companion ticket support and the signed iOS app before enforcing verified registration. Keep the existing admission directory and established pairings. Test development and TestFlight builds on physical devices. Check certificate validation, lost responses, reinstall limits, Apple outages, pairing, and actual background push delivery. Simulator tests cannot prove Apple's physical-device service.
 
-The current individual membership can be used for development and push testing.
-Conversion can happen later through Apple's membership update process. Apple asks
-the founder/cofounder to submit an organization request with its D-U-N-S number and
-may request verification documents. Re-check team membership, signing assets, and
-APNs credentials when Apple completes the change; do not assume it behaves like
-creating a new account or transferring an app.
+The code and local tests do not deploy a Worker or change Apple account capabilities. See [relay operations](../RelayService/OPERATIONS.md) for capacity and secret settings.
 
-Primary references: [Apple membership updates](https://developer.apple.com/help/account/membership/updating-your-account-information/),
-[creating service keys](https://developer.apple.com/help/account/keys/create-a-private-key/),
-and [APNs registration](https://developer.apple.com/documentation/usernotifications/registering-your-app-with-apns).
+References: [App Attest preparation](https://developer.apple.com/documentation/devicecheck/preparing-to-use-the-app-attest-service), [server validation](https://developer.apple.com/documentation/devicecheck/validating-apps-that-connect-to-your-server), and [risk receipts](https://developer.apple.com/documentation/devicecheck/assessing-fraud-risk).

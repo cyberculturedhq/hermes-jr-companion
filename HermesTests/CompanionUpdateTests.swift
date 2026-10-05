@@ -23,10 +23,13 @@ final class CompanionUpdateTests: XCTestCase {
         XCTAssertEqual(restored, progress)
         XCTAssertTrue(restored.pending)
         let prompt = try receipt.prompt
-        let token = try XCTUnwrap(prompt.components(separatedBy: "--receipt ").last?.components(separatedBy: "\n").first)
+        let token = try XCTUnwrap(prompt.components(separatedBy: "--receipt ").dropFirst().first?.components(separatedBy: "\n").first)
         XCTAssertNotNil(token.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression))
         XCTAssertEqual(try JSONDecoder().decode(CompanionUpdateReceipt.self, from: XCTUnwrap(Data(companionBase64: token))), receipt)
         XCTAssertFalse(try receipt.body["notify"] as! Bool)
+        XCTAssertFalse(prompt.contains("raw.githubusercontent.com"))
+        XCTAssertFalse(prompt.contains("curl "))
+        XCTAssertTrue(prompt.contains("hermes jr update --install --receipt"))
     }
 
     func testUpdateCompletionPreviewIsEncryptedAndRoutesToItsConversation() throws {

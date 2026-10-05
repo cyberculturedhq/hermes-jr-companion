@@ -118,7 +118,14 @@ describe("phone-bound setup broker", () => {
     expect(await response.json()).toMatchObject({ status: "cancelled" });
     expect((await put(intent, c, "reveal", { host_ephemeral: newToken() })).status).toBe(409);
     await runDurableObjectAlarm(env.SETUP_INTENTS.getByName(intent.intent_id));
-    expect((await request(path(intent), "GET", intent.owner_token, undefined, intent.ticket)).status).toBe(404);
+    expect((await request(path(intent), "GET", intent.owner_token, undefined, intent.ticket)).status).toBe(200);
+    const stub=env.SETUP_INTENTS.getByName(intent.intent_id);
+    await runInDurableObject(stub, (_instance,state)=>{
+      const row=state.storage.sql.exec<{value:string}>('SELECT value FROM state WHERE id=1').one();
+      state.storage.sql.exec('UPDATE state SET value=? WHERE id=1',JSON.stringify({...JSON.parse(row.value),expires_at:0}));
+    });
+    await runDurableObjectAlarm(stub);
+    expect(await runInDurableObject(stub, (_instance,state)=>state.storage.sql.exec<{count:number}>("SELECT COUNT(*) AS count FROM sqlite_master WHERE type='table'").one().count)).toBe(0);
   });
   it("enforces a shorter comparison deadline independently from the ticket expiry", async () => {
     const intent = await create(), h = await host(), c = claimBody(h);
@@ -142,6 +149,24 @@ describe("phone-bound setup broker", () => {
     expect(payload.pairing_ready).toBe(intent.intent_id);
     await add(intent, h, claimBody(h));
     await request(path(intent) + "/push", "PUT", intent.owner_token, body, intent.ticket);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it("retries a quota-delayed setup push and records only provider acceptance",async()=>{
+    const intent=await create(), h=await host(), object=env.SETUP_INTENTS.getByName(intent.intent_id);
+    await add(intent,h,claimBody(h));
+    await runInDurableObject(env.ADMISSION.getByName('service'),(_instance,state)=>{
+      state.storage.sql.exec("INSERT OR REPLACE INTO counters VALUES('setup_pushes',?,200)",Math.floor(Date.now()/86400_000));
+    });
+    await request(path(intent)+'/push','PUT',intent.owner_token,{apns_token:'ab'.repeat(32),environment:'sandbox'},intent.ticket);
+    const stored=()=>runInDurableObject(object,(_instance,state)=>JSON.parse(state.storage.sql.exec<{value:string}>('SELECT value FROM state').one().value));
+    await vi.waitFor(async()=>expect((await stored()).notifying_until).toBe(0));
+    expect((await stored()).notified).not.toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+    await runInDurableObject(env.ADMISSION.getByName('service'),(_instance,state)=>{state.storage.sql.exec("UPDATE counters SET used=0 WHERE name='setup_pushes'");});
+    vi.mocked(fetch).mockResolvedValue(new Response(null,{status:200}));
+    await runDurableObjectAlarm(object);
+    expect((await stored()).notified).toBe(true);
+    await runDurableObjectAlarm(object);
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 });

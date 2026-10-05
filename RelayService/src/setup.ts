@@ -1,11 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
-import { exactKeys, HttpError, handleErrors, json } from "./http";
+import { exactKeys, HttpError, handleErrors, json, unwrap, rpcResult } from "./http";
 import { key32, type SetupTicket } from "./setup-ticket";
 import { sameHash, UUID_PATTERN } from "./protocol";
 import { pushEnvironmentAllowed, sendSetupPush, type PushEnvironment } from "./apns";
 
 type Intent = SetupTicket & { owner_hash: string; status: "pending" | "complete" | "cancelled"; selected?: string;
-  push_token?: string; push_env?: PushEnvironment; notified?: boolean };
+  push_token?: string; push_env?: PushEnvironment; notified?: boolean; notifying_until?: number };
 type Claim = { claim_id: string; installation_id: string; host_public_key: string; host_name: string; commitment: string;
   token_hash: string; phone_ephemeral?: string; host_ephemeral?: string; confirmation?: string; envelope?: string; deadline?: number };
 
@@ -23,8 +23,8 @@ export class SetupIntent extends DurableObject<Env> {
       if (action === "snapshot") return json(this.snapshot(hash, id));
       if (action === "claim") this.addClaim(body, hash);
       else if (action === "push") this.registerPush(hash, body);
-      else if (action === "complete" || action === "cancel") { exactKeys(body, []); this.finish(hash, action === "cancel"); }
-      else if (id) this.transition(hash, id, action, body);
+      else if (action === "complete" || action === "cancel") { exactKeys(body, []); await this.finish(hash, action === "cancel"); }
+      else if (id) await this.transition(hash, id, action, body);
       else throw new HttpError(404, "not_found");
       return json({ status: "ok" });
     });
@@ -58,7 +58,11 @@ export class SetupIntent extends DurableObject<Env> {
     return publicValue;
   }
   async initialize(intent: SetupTicket, ownerHash: string): Promise<void> {
-    if (this.ctx.storage.sql.exec("SELECT id FROM state").toArray().length) throw new HttpError(409, "setup_exists");
+    if (this.ctx.storage.sql.exec("SELECT id FROM state").toArray().length) {
+      const prior=this.intent();
+      if (prior.intent_id===intent.intent_id && prior.phone_public_key===intent.phone_public_key && sameHash(prior.owner_hash,ownerHash)) return;
+      throw new HttpError(409,"setup_exists");
+    }
     this.save({ ...intent, owner_hash: ownerHash, status: "pending" });
     await this.ctx.storage.setAlarm(intent.expires_at * 1000);
   }
@@ -94,7 +98,8 @@ export class SetupIntent extends DurableObject<Env> {
     });
     this.ctx.waitUntil(this.notify());
   }
-  transition(hash: string, id: string, action: string, body: Record<string, unknown>): void {
+  async transition(hash: string, id: string, action: string, body: Record<string, unknown>): Promise<void> {
+    unwrap(await this.ctx.blockConcurrencyWhile(() => rpcResult(async () => {
     this.ctx.storage.transactionSync(() => {
       const intent = this.intent();
       const claim = this.claim(id);
@@ -119,8 +124,24 @@ export class SetupIntent extends DurableObject<Env> {
       claim[field] = value;
       this.saveClaim(claim);
     });
+    // Confirmation plus the host's encrypted enrollment establishes the pairing.
+    // A lost final phone acknowledgement must not expire a working connection.
+    if (action==='enrollment' && this.env.APP_ATTEST_MODE==='required') {
+      const intent=this.intent(), claim=this.claim(id);
+      unwrap(await this.env.ADMISSION.getByName('service').promote(claim.installation_id,intent.intent_id));
+    }
+    })));
   }
-  finish(hash: string, cancelled: boolean): void {
+  async finish(hash: string, cancelled: boolean): Promise<void> {
+    unwrap(await this.ctx.blockConcurrencyWhile(() => rpcResult(async () => {
+    const pending=this.intent(); this.owner(pending,hash);
+    if (pending.status!=='pending') return;
+    if (!cancelled && this.env.APP_ATTEST_MODE==='required') {
+      if (!pending.selected) throw new HttpError(409,'not_confirmed');
+      const claim=this.claim(pending.selected);
+      if (!claim.confirmation || !claim.envelope) throw new HttpError(409,'not_enrolled');
+      unwrap(await this.env.ADMISSION.getByName('service').promote(claim.installation_id,pending.intent_id));
+    }
     this.ctx.storage.transactionSync(() => {
       const intent = this.intent();
       this.owner(intent, hash);
@@ -135,6 +156,7 @@ export class SetupIntent extends DurableObject<Env> {
         this.saveClaim(claim);
       }
     });
+    })));
   }
   registerPush(hash: string, body: Record<string, unknown>): void {
     exactKeys(body, ["apns_token", "environment"]);
@@ -151,14 +173,27 @@ export class SetupIntent extends DurableObject<Env> {
   private async notify(): Promise<void> {
     let intent: Intent;
     try { intent = this.intent(); } catch { return; }
-    if (intent.status !== "pending" || intent.notified || !intent.push_token || !intent.push_env || !this.claims().length) return;
-    intent.notified = true; this.save(intent); // At most one doorbell, even concurrent claims/registers.
-    if (!await this.env.ADMISSION.getByName("service").push()) return;
-    await sendSetupPush(this.env, intent.push_token, intent.push_env, intent.intent_id, intent.expires_at);
+    if (intent.status !== "pending" || intent.notified || (intent.notifying_until ?? 0)>Date.now() || !intent.push_token || !intent.push_env || !this.claims().length) return;
+    intent.notifying_until=Date.now()+30_000; this.save(intent);
+    await this.ctx.storage.setAlarm(Math.min(intent.expires_at*1000,Date.now()+60_000));
+    if (!await this.env.ADMISSION.getByName("service").setupPush()) {
+      const current=this.intent(); current.notifying_until=0; this.save(current); return;
+    }
+    const result=await sendSetupPush(this.env,intent.push_token,intent.push_env,intent.intent_id,intent.expires_at);
+    let current: Intent; try { current=this.intent(); } catch { return; }
+    if (current.status!=='pending' || current.push_token!==intent.push_token || current.push_env!==intent.push_env) return;
+    current.notifying_until=0;
+    if (result.status==='accepted') current.notified=true;
+    if (result.status==='unregistered' || ['BadDeviceToken','DeviceTokenNotForTopic'].includes(result.reason ?? '')) { delete current.push_token; delete current.push_env; }
+    this.save(current);
   }
-  alarm(): void {
-    this.ctx.storage.transactionSync(() => {
-      this.ctx.storage.sql.exec("DELETE FROM claims; DELETE FROM state");
-    });
+  async alarm(): Promise<void> {
+    let intent: Intent;
+    try { intent=this.intent(); } catch { await this.ctx.storage.deleteAll(); return; }
+    await this.notify();
+    const remaining=this.ctx.storage.sql.exec<{value: string}>('SELECT value FROM state WHERE id=1').toArray()[0];
+    if (!remaining) return;
+    const current: Intent=JSON.parse(remaining.value);
+    await this.ctx.storage.setAlarm(current.notified || !current.push_token ? intent.expires_at*1000 : Math.min(intent.expires_at*1000,Date.now()+60_000));
   }
 }

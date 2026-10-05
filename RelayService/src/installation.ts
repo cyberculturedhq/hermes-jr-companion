@@ -10,6 +10,38 @@ type SocketState = { role: "host" | "device"; deviceId?: string; hostId: string;
 type Budget = { key: string; period: number; maximum: number; amount?: number };
 type PushReceipt = Omit<PushResult, "status"> & { status: PushResult["status"] | "pending"; expires_at: number };
 
+function validateOperation(suffix: string, method: string, body: Record<string, unknown> | undefined): void {
+  if ((suffix === '/host' && method === 'GET') || (suffix === '/devices' && method === 'GET')
+    || (suffix === '' && method === 'DELETE')) return;
+  const device = /^\/devices\/[0-9a-f-]{36}(\/connect|\/push(?:\/receipts\/[A-Za-z0-9_-]{32,64})?)?$/.exec(suffix);
+  if (suffix === '/devices' && method === 'POST') { exactKeys(body!, []); return; }
+  if (!device) throw new HttpError(404, 'not_found');
+  if ((device[1] === '/connect' || device[1]?.startsWith('/push/receipts/')) && method === 'GET') return;
+  if ((!device[1] || device[1] === '/push') && method === 'DELETE') return;
+  if (!device[1] && method === 'PUT') {
+    exactKeys(body!, ['device_token']); if (!key32(body!.device_token)) throw new HttpError(400, 'invalid_token'); return;
+  }
+  if (device[1] === '/push' && method === 'PUT') {
+    exactKeys(body!, ['apns_token', 'environment']);
+    if (typeof body!.apns_token !== 'string' || !/^(?:[0-9a-fA-F]{2}){16,128}$/.test(body!.apns_token)
+      || !['sandbox','production'].includes(String(body!.environment))) throw new HttpError(400,'invalid_push_registration');
+    return;
+  }
+  if (device[1] === '/push' && method === 'POST') {
+    exactKeys(body!, 'encrypted' in body! ? ['reference','encrypted'] : ['reference']);
+    if (typeof body!.reference !== 'string' || !REFERENCE_PATTERN.test(body!.reference)) throw new HttpError(400,'invalid_reference');
+    if ('encrypted' in body!) {
+      const value=body!.encrypted;
+      if (!value || typeof value!=='object' || Array.isArray(value)) throw new HttpError(400,'invalid_ciphertext');
+      const fields=value as Record<string,unknown>; exactKeys(fields,['v','kid','data']);
+      if (fields.v!==1 || typeof fields.kid!=='string' || !/^[A-Za-z0-9_-]{22}$/.test(fields.kid)
+        || typeof fields.data!=='string' || !/^[A-Za-z0-9_-]{1403}$/.test(fields.data)) throw new HttpError(400,'invalid_ciphertext');
+    }
+    return;
+  }
+  throw new HttpError(404,'not_found');
+}
+
 /** One installation is one coordination atom. No application payload is ever stored. */
 export class InstallationRelay extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -40,13 +72,21 @@ export class InstallationRelay extends DurableObject<Env> {
   /** Internal binding RPC only; the public Worker never maps an HTTP route to this method. */
   initialize(id: string, hostHash: string): void {
     if (!UUID_PATTERN.test(id) || !/^[A-Za-z0-9_-]{43}$/.test(hostHash)) throw new Error("Invalid registration");
-    if (this.installation()) throw new Error("Installation exists");
+    if (this.installation()) {
+      if (this.authorizeSetup(hostHash) && this.installation()!.id===id) return;
+      throw new Error("Installation exists");
+    }
     this.ctx.storage.sql.exec("INSERT INTO installation (id, host_hash) VALUES (?, ?)", id, hostHash);
   }
 
   authorizeSetup(hostHash: string): boolean {
     const current = this.installation();
     return current !== undefined && sameHash(hostHash, current.host_hash);
+  }
+
+  async destroy(): Promise<void> {
+    for (const socket of this.sockets()) this.close(socket, 4003, 'Installation removed');
+    await this.ctx.storage.deleteAll();
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -72,6 +112,17 @@ export class InstallationRelay extends DurableObject<Env> {
       const device = deviceId ? this.device(deviceId) : undefined;
       const isDevice = device !== undefined && sameHash(hash, device.token_hash);
       if (!isHost && !isDevice) return failure(401, "unauthorized");
+      const hostOperation=suffix==='/host' || suffix==='/devices' || suffix==='' || Boolean(receiptReference)
+        || (Boolean(deviceMatch) && !deviceMatch?.[2]) || (deviceMatch?.[2]==='/push' && request.method==='POST');
+      const deviceOperation=deviceMatch?.[2]==='/connect' || (deviceMatch?.[2]==='/push' && request.method==='PUT');
+      if (hostOperation && !isHost) return failure(403,'host_required');
+      if (deviceOperation && !isDevice) return failure(403,'device_required');
+      validateOperation(suffix, request.method, body);
+      const admission = await this.env.ADMISSION.getByName('service').admissionResult(current.id);
+      if (admission==='unknown') return failure(401,'unauthorized');
+      if (admission==='capacity') return failure(503,'service_capacity_reached');
+      // The directory RPC can yield. Recheck credentials before any mutation.
+      if (!this.authorizeSetup(hash) && (!deviceId || !this.device(deviceId) || !sameHash(hash,this.device(deviceId)!.token_hash))) return failure(401,'unauthorized');
 
       if (suffix === "/host" && request.method === "GET") {
         if (!isHost) return failure(403, "host_required");
@@ -348,7 +399,7 @@ export class InstallationRelay extends DurableObject<Env> {
     ]);
     this.ctx.storage.sql.exec("INSERT INTO push_receipts (device_id, reference, status, expires_at) VALUES (?, ?, 'pending', ?)", device.id, reference, now + 86400_000);
     if (await this.ctx.storage.getAlarm() === null) await this.ctx.storage.setAlarm(now + 86400_000);
-    if (!await this.env.ADMISSION.getByName("service").push()) {
+    if (!await this.env.ADMISSION.getByName("service").push(this.installation()!.id)) {
       this.ctx.storage.sql.exec("DELETE FROM push_receipts WHERE device_id = ? AND reference = ?", device.id, reference);
       return failure(429, "push_capacity_reached");
     }
@@ -360,7 +411,7 @@ export class InstallationRelay extends DurableObject<Env> {
     // UPDATE cannot recreate a receipt if the device was revoked while APNs was in flight.
     this.ctx.storage.sql.exec("UPDATE push_receipts SET status = ?, stage = ?, apns_status = ?, reason = ? WHERE device_id = ? AND reference = ?",
       status, result.stage, result.apns_status, result.reason, device.id, reference);
-    if (status === "unregistered") this.ctx.storage.sql.exec(
+    if (status === "unregistered" || ['BadDeviceToken','DeviceTokenNotForTopic'].includes(result.reason ?? '')) this.ctx.storage.sql.exec(
       "UPDATE devices SET push_token = NULL, push_env = NULL WHERE id = ? AND push_token = ? AND push_env = ?",
       device.id, device.push_token, device.push_env,
     );

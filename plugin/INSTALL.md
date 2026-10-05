@@ -4,21 +4,29 @@ This is the current setup guide. When the user supplies a setup ticket, follow i
 
 ## 1. Prepare Hermes
 
-Run these commands together in one terminal call with timeout 300:
+For an installed companion, run the installed check:
+
+```sh
+hermes jr prepare
+```
+
+`ready` returns the Hermes Python path. This command keeps services, code, and profile choices. If an older companion has no `prepare` command, use its installed `doctor`, `service status`, and `backend status` commands. Check that installed copies are consistent, the service and dashboard checks are `ok`, and the backend has a persistent supervisor. Use Hermes' selected Python for the pairing command. Stop on an error. Read [STARTUP.md](STARTUP.md) from the installed plugin. Do not download `install.py` to check, update, or repair an installed companion.
+
+For the **first installation only**, use the repository requested by the user. This step trusts executable code from that repository. The later release signature check does not verify the bootstrap script itself. Run these commands together in one terminal call with timeout 300. Replace `TICKET` with the phone's exact setup ticket:
 
 ```sh
 jr_setup_dir=$(mktemp -d)
 curl -fsSL https://raw.githubusercontent.com/cyberculturedhq/hermes-jr-companion/main/install.py -o "$jr_setup_dir/install.py"
-python3 "$jr_setup_dir/install.py"
+python3 "$jr_setup_dir/install.py" --setup-ticket 'TICKET'
 ```
 
-The script installs when missing and checks an existing installation without updating, re-enabling profiles, or restarting it. Wait for this invocation to exit. `ready` returns the Hermes Python path. If it exits with an error or times out, stop and report the exact error and private log path. Do not retry, patch the downloaded installer, override Hermes runtime functions, or change Hermes source to finish setup. Collect the log and follow [STARTUP.md](STARTUP.md) to diagnose that specific problem. Updates require the user's explicit request and [UPDATES.md](UPDATES.md).
+Wait for this invocation to exit. `ready` returns the Hermes Python path. If it fails or times out, stop and report the error and private log path. Keep the downloaded file for diagnosis. Do not replace or patch it as a repair. Updates require the user's explicit request and [UPDATES.md](UPDATES.md).
 
 If the backend is externally managed, verify its persistent supervisor and current `doctor` checks before continuing. A listening port alone does not prove it will survive a terminal closing. Preserve existing services and profile choices.
 
 ### A stopped first installation
 
-After diagnosing the original error and confirming no installer or PM worker remains, run the downloaded script with `--complete-install` to finish the originally requested installation across profiles. Existing copies must match the current signed release exactly; only missing copies are installed. This option enables Hermes Jr. in the installation's live profiles and checks supervised startup. It preserves phone state. If the installed package is older than the signed release, perform the explicitly requested `--update` first, then `--complete-install`. Stop on the first error and report it. Pair only after the installer returns `ready` and the interactive Hermes session has been reopened.
+Use the private recovery files saved by the original installer or the installed updater. Keep the current phone state. The original, explicitly trusted first-install file supports `--complete-install --setup-ticket 'TICKET'` for a partial installation at the same signed release. Do not download a replacement bootstrap to repair it. If the trusted files are unavailable, stop and request a supported manual migration. Pair only after health checks pass and the interactive Hermes session has reopened.
 
 ## 2. Pair
 

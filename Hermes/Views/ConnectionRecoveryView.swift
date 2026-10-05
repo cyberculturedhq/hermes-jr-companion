@@ -5,6 +5,7 @@ struct ConnectionRecoveryView: View {
     @Environment(AppStore.self) private var store
     let notice: ConnectionRecovery
     let onRemoved: () -> Void
+    var onSecureSetup: () -> Void = {}
     @State private var confirmRemoval = false
 
     private var removalRequired: Bool { notice == .credentialsInvalid || notice == .pairAgain }
@@ -20,6 +21,11 @@ struct ConnectionRecoveryView: View {
                 Text(notice.message).foregroundStyle(.secondary)
             }.multilineTextAlignment(.center)
             VStack(spacing: 16) {
+                if notice == .secureConnectionRequired {
+                    Button("Choose secure connection", action: onSecureSetup)
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("recovery.secureSetup")
+                }
                 if notice.canRetry {
                     Button {
                         Task { await store.retrySavedConnection() }

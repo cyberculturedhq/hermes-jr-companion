@@ -4,7 +4,7 @@ import UIKit
 import CryptoKit
 
 enum ConnectionRecovery: Equatable {
-    case pairAgain, unavailable, offline, serviceUnavailable, credentialsUnavailable, credentialsInvalid
+    case pairAgain, unavailable, offline, serviceUnavailable, credentialsUnavailable, credentialsInvalid, secureConnectionRequired
 
     var title: String {
         switch self {
@@ -14,6 +14,7 @@ enum ConnectionRecovery: Equatable {
         case .serviceUnavailable: "Connection service unavailable"
         case .credentialsUnavailable: "Couldn’t read saved sign-in details"
         case .credentialsInvalid: "Couldn’t read saved sign-in details"
+        case .secureConnectionRequired: "Use a secure connection"
         }
     }
 
@@ -25,10 +26,11 @@ enum ConnectionRecovery: Equatable {
         case .serviceUnavailable: "Try reconnecting later. The service used for this connection is unavailable."
         case .credentialsUnavailable: "This device could not read the saved sign-in details. Please retry again."
         case .credentialsInvalid: "The saved sign-in details are unreadable. Please remove the connection to start again."
+        case .secureConnectionRequired: HermesError.secureConnectionRequired.localizedDescription
         }
     }
 
-    var canRetry: Bool { self != .pairAgain && self != .credentialsInvalid }
+    var canRetry: Bool { self != .pairAgain && self != .credentialsInvalid && self != .secureConnectionRequired }
 
     static func credentialFailure(_ error: Error) -> Self {
         if let failure = error as? CredentialReadError, case .invalidData = failure {
@@ -38,6 +40,7 @@ enum ConnectionRecovery: Equatable {
     }
 
     static func companionFailure(_ error: Error) -> Self {
+        if let error = error as? HermesError, case .secureConnectionRequired = error { return .secureConnectionRequired }
         if let failure = error as? CompanionConnectionFailure {
             switch failure {
             case .pairingRequired: return .pairAgain

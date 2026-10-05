@@ -1,3 +1,15 @@
+## Unreleased
+
+- Verify the official iOS app before public relay setup. Keep the existing numeric comparison.
+- Reserve relay request and push capacity by verified app identity. Erase abandoned provisional registrations.
+- Start updates and installed setup checks through trusted installed code. Keep guided update receipts.
+- Require HTTPS for direct phone connections. Show saved HTTP connections how to migrate.
+- Bound upload and reply storage. Keep completed history and delivery records. Accept exact upload retries.
+- Read local API request bodies under route-specific byte limits. Authenticate before protected device reads.
+- Check private file names and Git history for secrets in CI.
+
+This work needs companion and signed iOS releases before hosted verification enforcement. Physical Apple verification and private deployment checks remain release steps. See [Apple configuration](../Protocol/APPLE-SETUP.md), [relay operations](../RelayService/OPERATIONS.md), and [storage limits](STORAGE.md).
+
 ## 0.18.1
 
 - Preserve local plugin edits made while an update or rollback stops the service.

@@ -71,7 +71,13 @@ enum ConnectionPhase: Equatable {
 
 enum HermesError: LocalizedError {
     case message(String)
-    var errorDescription: String? { if case let .message(text) = self { text } else { "Connection failed." } }
+    case secureConnectionRequired
+    var errorDescription: String? {
+        switch self {
+        case .message(let text): text
+        case .secureConnectionRequired: "This direct connection needs HTTPS. Configure HTTPS on your computer, or use encrypted companion mode. Your saved connection is kept until you choose a secure connection."
+        }
+    }
 }
 
 struct HermesHTTPError: LocalizedError {

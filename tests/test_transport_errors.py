@@ -38,7 +38,7 @@ class TransportErrorTests(unittest.IsolatedAsyncioTestCase):
 
     def rejected_uploads(self):
         upload(self.state, self.device, self.body)
-        return [self.body, dict(self.body, upload_id=str(uuid.uuid4()), offset=3),
+        return [dict(self.body, content_base64=base64.b64encode(b'xyz').decode()), dict(self.body, upload_id=str(uuid.uuid4()), offset=3),
                 dict(self.body, upload_id=[]), dict(self.body, upload_id=None)]
 
     async def test_direct_upload_errors_return_bad_request(self):

@@ -78,6 +78,8 @@ class State:
                     attempts INTEGER NOT NULL DEFAULT 0, next_attempt REAL NOT NULL DEFAULT 0,
                     UNIQUE(device_id, event_key));
             """)
+        from .storage import initialize
+        initialize(self)
 
     @contextlib.contextmanager
     def connect(self):

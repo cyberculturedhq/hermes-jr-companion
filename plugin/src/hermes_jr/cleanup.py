@@ -4,6 +4,8 @@ import aiohttp
 
 
 async def sweep(state, service):
+    from .storage import sweep as storage_sweep
+    await asyncio.to_thread(storage_sweep, state)
     state.expire_pending()
     for pending in state.pending_deletions():
         try:

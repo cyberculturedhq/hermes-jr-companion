@@ -11,6 +11,8 @@ class UploadTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.state = State(Path(self.temp.name))
+        for device in ('a', 'b'):
+            self.state.add_device(device, 'Phone', 'fixture-token', paired=True)
         self.body = dict(upload_id=str(uuid.uuid4()), filename='report.pdf', offset=0,
                          total=6, content_base64=base64.b64encode(b'abc').decode())
 
@@ -26,8 +28,7 @@ class UploadTests(unittest.TestCase):
 
     def test_retries_do_not_append_or_overwrite(self):
         upload(self.state, 'a', self.body)
-        with self.assertRaises(ValueError):
-            upload(self.state, 'a', self.body)
+        self.assertEqual(upload(self.state, 'a', self.body)['offset'], 3)
         with self.assertRaises(ValueError):
             upload(self.state, 'a', dict(self.body, offset=2))
         result = upload(self.state, 'a', dict(self.body, offset=3))
