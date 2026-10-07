@@ -21,7 +21,7 @@
 				);
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"DEVELOPMENT_TEAM" = "56MTG87283";
-				"MARKETING_VERSION" = "0.1.0";
+				"MARKETING_VERSION" = "0.1.1";
 				"INFOPLIST_FILE" = "Hermes/Info.plist";
 				"TARGETED_DEVICE_FAMILY" = "1,2";
 				"APNS_ENVIRONMENT" = "development";
@@ -34,7 +34,7 @@
 				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
 				"PRODUCT_NAME" = "$(TARGET_NAME)";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.hermesjr.app";
-				"CURRENT_PROJECT_VERSION" = "4";
+				"CURRENT_PROJECT_VERSION" = "5";
 				"SUPPORTS_MACCATALYST" = "NO";
 				"INFOPLIST_KEY_NotificationKeychainGroup" = "$(AppIdentifierPrefix)com.hermesjr.notifications";
 			};
@@ -165,7 +165,7 @@
 				);
 				"SWIFT_EMIT_LOC_STRINGS" = "YES";
 				"DEVELOPMENT_TEAM" = "56MTG87283";
-				"MARKETING_VERSION" = "0.1.0";
+				"MARKETING_VERSION" = "0.1.1";
 				"INFOPLIST_FILE" = "Hermes/Info.plist";
 				"TARGETED_DEVICE_FAMILY" = "1,2";
 				"APNS_ENVIRONMENT" = "production";
@@ -178,7 +178,7 @@
 				"ASSETCATALOG_COMPILER_APPICON_NAME" = "AppIcon";
 				"PRODUCT_NAME" = "$(TARGET_NAME)";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.hermesjr.app";
-				"CURRENT_PROJECT_VERSION" = "4";
+				"CURRENT_PROJECT_VERSION" = "5";
 				"SUPPORTS_MACCATALYST" = "NO";
 				"INFOPLIST_KEY_NotificationKeychainGroup" = "$(AppIdentifierPrefix)com.hermesjr.notifications";
 			};
@@ -311,7 +311,7 @@
 					"@loader_path/Frameworks",
 				);
 				"BUNDLE_LOADER" = "$(TEST_HOST)";
-				"MARKETING_VERSION" = "0.1.0";
+				"MARKETING_VERSION" = "0.1.1";
 				"TARGETED_DEVICE_FAMILY" = "1,2";
 				"TEST_HOST" = "$(BUILT_PRODUCTS_DIR)/Hermes.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Hermes";
 				"GENERATE_INFOPLIST_FILE" = "YES";
@@ -320,7 +320,7 @@
 				"PRODUCT_NAME" = "$(TARGET_NAME)";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.hermesjr.app.tests";
 				"SUPPORTS_MACCATALYST" = "NO";
-				"CURRENT_PROJECT_VERSION" = "4";
+				"CURRENT_PROJECT_VERSION" = "5";
 			};
 			"name" = "Debug";
 		};
@@ -419,7 +419,7 @@
 					"@loader_path/Frameworks",
 				);
 				"BUNDLE_LOADER" = "$(TEST_HOST)";
-				"MARKETING_VERSION" = "0.1.0";
+				"MARKETING_VERSION" = "0.1.1";
 				"TARGETED_DEVICE_FAMILY" = "1,2";
 				"TEST_HOST" = "$(BUILT_PRODUCTS_DIR)/Hermes.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Hermes";
 				"GENERATE_INFOPLIST_FILE" = "YES";
@@ -428,7 +428,7 @@
 				"PRODUCT_NAME" = "$(TARGET_NAME)";
 				"PRODUCT_BUNDLE_IDENTIFIER" = "com.hermesjr.app.tests";
 				"SUPPORTS_MACCATALYST" = "NO";
-				"CURRENT_PROJECT_VERSION" = "4";
+				"CURRENT_PROJECT_VERSION" = "5";
 			};
 			"name" = "Release";
 		};
@@ -472,8 +472,8 @@
 				"GENERATE_INFOPLIST_FILE" = "NO";
 				"SKIP_INSTALL" = "YES";
 				"APPLICATION_EXTENSION_API_ONLY" = "YES";
-				"CURRENT_PROJECT_VERSION" = "4";
-				"MARKETING_VERSION" = "0.1.0";
+				"CURRENT_PROJECT_VERSION" = "5";
+				"MARKETING_VERSION" = "0.1.1";
 				"DEVELOPMENT_TEAM" = "56MTG87283";
 				"TARGETED_DEVICE_FAMILY" = "1,2";
 				"LD_RUNPATH_SEARCH_PATHS" = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";
@@ -492,8 +492,8 @@
 				"GENERATE_INFOPLIST_FILE" = "NO";
 				"SKIP_INSTALL" = "YES";
 				"APPLICATION_EXTENSION_API_ONLY" = "YES";
-				"CURRENT_PROJECT_VERSION" = "4";
-				"MARKETING_VERSION" = "0.1.0";
+				"CURRENT_PROJECT_VERSION" = "5";
+				"MARKETING_VERSION" = "0.1.1";
 				"DEVELOPMENT_TEAM" = "56MTG87283";
 				"TARGETED_DEVICE_FAMILY" = "1,2";
 				"LD_RUNPATH_SEARCH_PATHS" = "$(inherited) @executable_path/Frameworks @executable_path/../../Frameworks";

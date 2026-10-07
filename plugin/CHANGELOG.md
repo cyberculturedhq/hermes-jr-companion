@@ -1,4 +1,4 @@
-## Unreleased
+## 0.19.0
 
 - Verify the official iOS app before public relay setup. Keep the existing numeric comparison.
 - Reserve relay request and push capacity by verified app identity. Erase abandoned provisional registrations.
