@@ -22,9 +22,9 @@ export async function setupPublicKey(env: Env): Promise<string> {
   if (!("x" in key) || !key.x) throw new Error("Invalid signing key");
   return key.x;
 }
-export async function issueTicket(env: Env, phoneKey: string, service: string): Promise<{ ticket: string; intent: SetupTicket }> {
-  const issued = Math.floor(Date.now() / 1000);
-  const intent = { intent_id: newToken(), phone_public_key: phoneKey, expires_at: issued + 1200, service };
+export async function issueTicket(env: Env, phoneKey: string, service: string, attempt?: { intent_id: string; issued: number }): Promise<{ ticket: string; intent: SetupTicket }> {
+  const issued = attempt?.issued ?? Math.floor(Date.now() / 1000);
+  const intent = { intent_id: attempt?.intent_id ?? newToken(), phone_public_key: phoneKey, expires_at: issued + 1200, service };
   const payload = base64url(new TextEncoder().encode(JSON.stringify([1, intent.intent_id, phoneKey, issued, intent.expires_at, service])));
   const signed = `HJ1.${payload}`;
   const signature = await crypto.subtle.sign("Ed25519", await signingKey(env), new TextEncoder().encode(signed));

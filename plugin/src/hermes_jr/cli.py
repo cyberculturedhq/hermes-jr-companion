@@ -27,6 +27,7 @@ def configure_parser(parser):
     setup = commands.add_parser("setup", help="Configure service and independent remote/push switches")
     setup.add_argument("--service", required=True)
     setup.add_argument("--dashboard", default="http://127.0.0.1:9119")
+    setup.add_argument("--ticket", help="Use the phone's verified setup ticket for public service registration")
     setup.add_argument("--relay", action=argparse.BooleanOptionalAction, default=None)
     setup.add_argument("--push", action=argparse.BooleanOptionalAction, default=None)
     setup.add_argument("--allow-local-service", action="store_true", help="Allow loopback HTTP for development")
@@ -35,8 +36,10 @@ def configure_parser(parser):
     backend = commands.add_parser("backend", help="Manage a dedicated loopback Hermes backend when no existing supervisor provides one")
     backend.add_argument("backend_action", choices=["install", "status", "uninstall"])
     commands.add_parser("doctor", help="Check service and dashboard connectivity without exposing secrets")
+    commands.add_parser("prepare", help="Check an installed companion before pairing; preserve services and profiles")
     update = commands.add_parser("update", help="Check stable releases and show the explicit update procedure")
     update.add_argument("--install", action="store_true", help="Explicitly install the latest compatible stable release with rollback; use when Hermes work is idle")
+    update.add_argument("--receipt", help="Preserve the guided update receipt from the phone; requires --install")
     commands.add_parser("rollback", help="Restore the code saved by the last managed update; preserve pairings")
     update.add_argument("--checks", choices=["on", "off"], help="Enable or disable automatic daily release checks")
     pair = commands.add_parser("pair", help="Connect using the phone’s setup ticket and numeric comparison")
@@ -82,11 +85,31 @@ async def execute(args):
         return
     async with client_session(timeout=aiohttp.ClientTimeout(total=30)) as client:
         service = Service(state, client)
-        if args.jr_command == "doctor":
+        if args.jr_command in {"doctor", "prepare"}:
             from .diagnostics import check
-            print(json.dumps(await check(state, client), indent=2))
+            health = await check(state, client)
+            if args.jr_command == "prepare":
+                from .supervisor import Supervisor
+                from .backend import BackendSupervisor
+                if health.get('installation', {}).get('status') != 'consistent':
+                    raise ValueError('The installed companion copies do not match. Read STARTUP.md from the installed plugin.')
+                if not Supervisor(state).status().get('manager_active') or not BackendSupervisor(state).status().get('manager_active'):
+                    raise ValueError('Supervised startup is unavailable. Read STARTUP.md from the installed plugin.')
+                if health.get('service') != 'ok' or health.get('dashboard_rpc') != 'ok':
+                    raise ValueError('Connection checks failed. Run hermes jr doctor and fix the reported problem.')
+                import importlib.metadata
+                print(json.dumps({'status': 'ready', 'version': importlib.metadata.version('hermes-jr-companion'),
+                                  'python': sys.executable, 'reused': True}))
+            else:
+                print(json.dumps(health, indent=2))
         elif args.jr_command == "update":
             from .updates import check
+            receipt = getattr(args, 'receipt', None)
+            if receipt and (not getattr(args, 'install', False) or args.checks):
+                raise ValueError('An update receipt requires --install without --checks')
+            if receipt:
+                from .update_requests import decode
+                decode(receipt)  # Reject invalid requests before network or configuration work.
             if args.checks:
                 state.settings({"update_checks_enabled": args.checks == "on"})
             result = await check(state, client, force=True) if args.checks != "off" else state.get("update_status", {})
@@ -94,8 +117,12 @@ async def execute(args):
             if getattr(args, "install", False):
                 if args.checks == "off":
                     raise ValueError("Cannot install while disabling release checks")
-                from .installer import install
-                await asyncio.to_thread(install, state, result)
+                if receipt:
+                    from .update_requests import run_tracked
+                    await asyncio.to_thread(run_tracked, state, result, receipt)
+                else:
+                    from .installer import install
+                    await asyncio.to_thread(install, state, result)
             elif result.get("state") == "available":
                 print("Install explicitly when Hermes work is idle. Follow https://github.com/cyberculturedhq/hermes-jr-companion/blob/main/UPDATES.md")
                 print("Target immutable commit: " + result["commit"])
@@ -115,7 +142,20 @@ async def execute(args):
                 raise ValueError("This service has not configured Apple push delivery")
             values = {"service_url": origin, "dashboard_url": local, "relay_enabled": relay_enabled, "push_enabled": push_enabled}
             if not state.get("installation_id") or prior != origin:
-                installation = await service.request("POST", "/v1/installations", {})
+                registration = {}
+                if capabilities.get('registration_requires_ticket'):
+                    ticket = getattr(args, 'ticket', None)
+                    if not ticket:
+                        raise ValueError("The public service needs the phone's setup ticket. Run setup with --ticket from the phone prompt.")
+                    from .setup_crypto import verify_ticket
+                    issuer = await service.request('GET', '/v1/pairing/key')
+                    verify_ticket(ticket, issuer['public_key'], origin)
+                    from .state import token
+                    host_token = state.get('registration_token') if prior == origin else None
+                    host_token = host_token or token()
+                    state.settings({'registration_token': host_token, 'service_url': origin})
+                    registration = {'setup_ticket': ticket, 'host_token': host_token}
+                installation = await service.request("POST", "/v1/installations", registration)
                 values.update(installation_id=str(uuid.UUID(installation["installation_id"])), host_token=installation["host_token"])
             if not state.get("host_private_key"):
                 from .secure_channel import generate_private_key

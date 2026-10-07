@@ -53,7 +53,8 @@ struct AppRootView: View {
                     ))
                 case .disconnected, .connecting:
                     if store.phase == .disconnected, let notice = store.connectionNotice {
-                        ConnectionRecoveryView(notice: notice) { showRemovedNotice = true }
+                        ConnectionRecoveryView(notice: notice, onRemoved: { showRemovedNotice = true },
+                            onSecureSetup: { onboardingVisible = true })
                     } else {
                         EmptyView()
                     }

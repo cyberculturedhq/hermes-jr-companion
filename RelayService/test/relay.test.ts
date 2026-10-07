@@ -126,6 +126,30 @@ describe("installation authentication", () => {
   });
 });
 
+describe("terminal Apple token errors", () => {
+  it.each(["BadDeviceToken", "DeviceTokenNotForTopic"])("removes the matching token for %s", async (reason) => {
+    const install=await installation(), phone=await device(install), path=`${devicePath(install,phone)}/push`;
+    expect((await request(path,"PUT",phone.device_token,{apns_token:"a".repeat(64),environment:"sandbox"})).status).toBe(200);
+    vi.mocked(fetch).mockImplementation(async()=>Response.json({reason},{status:400}));
+    const reference=newToken();
+    expect((await request(path,"POST",install.host_token,{reference})).status).toBe(502);
+    expect(await (await request(`${path}/receipts/${reference}`,"GET",install.host_token)).json()).toMatchObject({stage:"apns",reason});
+    expect((await request(path,"POST",install.host_token,{reference:newToken()})).status).toBe(409);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+  it("keeps a replacement token when the old token fails in flight",async()=>{
+    const install=await installation(), phone=await device(install), path=`${devicePath(install,phone)}/push`;
+    await request(path,"PUT",phone.device_token,{apns_token:"a".repeat(64),environment:"sandbox"});
+    vi.mocked(fetch).mockImplementationOnce(async()=>{
+      expect((await request(path,"PUT",phone.device_token,{apns_token:"b".repeat(64),environment:"sandbox"})).status).toBe(200);
+      return new Response(JSON.stringify({reason:"BadDeviceToken"}),{status:400});
+    });
+    expect((await request(path,"POST",install.host_token,{reference:newToken()})).status).toBe(502);
+    const stored=await runInDurableObject(env.INSTALLATIONS.getByName(install.installation_id),(_instance,state)=>state.storage.sql.exec('SELECT push_token FROM devices WHERE id=?',phone.device_id).one().push_token);
+    expect(stored).toBe("b".repeat(64));
+  });
+});
+
 describe("opaque WebSocket forwarding", () => {
   it("forwards exact ciphertext only to its peer, including after hibernation", async () => {
     const install = await installation();
@@ -551,14 +575,14 @@ describe("service admission budgets", () => {
     expect(JSON.stringify(await response.json())).not.toContain("installation_id");
     expect((await worker.fetch(new Request("https://relay.test/v1/installations", {method:"POST",body:"{}"}), {...env,RELAY_ENABLED:"false"})).status).toBe(503);
   });
-  it("enforces push and lifetime budgets across installations and survives eviction", async () => {
+  it("retains push limits and permits registration after historical creation totals", async () => {
     const stub = env.ADMISSION.getByName("service");
     await runInDurableObject(stub, (_instance, state) => {
       state.storage.sql.exec("INSERT INTO totals VALUES ('created',250)");
       state.storage.sql.exec("INSERT INTO counters VALUES ('pushes',?,3000)", Math.floor(Date.now()/86400_000));
     });
     await evictDurableObject(stub);
-    expect(await stub.reserve(crypto.randomUUID())).toBe(false);
+    expect(await stub.reserve(crypto.randomUUID())).toBe(true);
     expect(await stub.push()).toBe(false);
   });
 });

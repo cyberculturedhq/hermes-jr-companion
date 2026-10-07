@@ -93,6 +93,8 @@ def submit(state, device_id, request_id, profile, session_id, body):
     # only retry the same pinned owner and mailbox ID.
     with state.connect() as db:
         db.execute('BEGIN IMMEDIATE')
+        from .storage import require_device
+        require_device(db, device_id)
         row = db.execute('SELECT value FROM settings WHERE key=?', (record_key,)).fetchone()
         if row:
             record = json.loads(row[0])
@@ -115,7 +117,10 @@ def submit(state, device_id, request_id, profile, session_id, body):
             record = dict(fingerprint=fingerprint, home=str(home), profile=profile, session_id=tip,
                           owner=pinned, route='owner' if pinned else 'session', message=message, paths=paths,
                           delivery_id=hashlib.sha256(record_key.encode()).hexdigest())
-            db.execute('INSERT INTO settings VALUES (?,?)', (record_key, json.dumps(record)))
+            from .storage import reserve_reply
+            serialized = json.dumps(record)
+            reserve_reply(state, db, device_id, record_key, serialized)
+            db.execute('INSERT INTO settings VALUES (?,?)', (record_key, serialized))
     if record['route'] == 'owner':
         _, _, delivery = runtime(record['profile'])
         # No bot attribution: this is the person's message, not an agent DM.

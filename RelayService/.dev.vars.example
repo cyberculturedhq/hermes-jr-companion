@@ -9,3 +9,7 @@ OPERATOR_TOKEN=""
 
 # Separate Ed25519 PKCS#8 key encoded as base64url. See Protocol/SETUP.md.
 SETUP_TICKET_PRIVATE_KEY=""
+
+# DeviceCheck-enabled server key for App Attest risk assessment. Keep real values private.
+APP_ATTEST_FRAUD_KEY_ID=""
+APP_ATTEST_FRAUD_PRIVATE_KEY=""

@@ -13,6 +13,7 @@ export default defineConfig({
     miniflare: {
       bindings: {
         SETUP_TICKET_PRIVATE_KEY: setupKey,
+        APP_ATTEST_MODE: "off",
         APNS_TEAM_ID: "TESTTEAM01",
         APNS_KEY_ID: "TESTKEY001",
         APNS_TOPIC: "test.hermes.jr",

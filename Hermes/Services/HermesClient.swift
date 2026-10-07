@@ -1476,34 +1476,16 @@ final class HermesClient {
               ["http", "https"].contains(scheme), let host = components.host, !host.isEmpty,
               components.user == nil, components.password == nil, components.query == nil, components.fragment == nil,
               let url = components.url else {
-            throw HermesError.message("Enter a full dashboard address, such as https://hermes.example.com or http://192.168.1.10:9119.")
+            throw HermesError.message("Enter a full HTTPS dashboard address, such as https://hermes.example.com.")
         }
-        if scheme == "http" && !isPrivateHost(host) {
-            throw HermesError.message("Use HTTPS for hosted Hermes. HTTP is supported only for local or private network addresses.")
+        if scheme != "https" {
+            throw HermesError.secureConnectionRequired
         }
         return url
     }
 
     private static func isLoopback(_ host: String) -> Bool {
         ["localhost", "127.0.0.1", "::1"].contains(host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]")))
-    }
-
-    private static func isPrivateHost(_ rawHost: String) -> Bool {
-        let host = rawHost.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        if isLoopback(host) || host.hasSuffix(".local") { return true }
-        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
-        let octets = parts.compactMap { part -> Int? in
-            guard !part.isEmpty, part.allSatisfy({ $0.isASCII && $0.isNumber }) else { return nil }
-            return Int(part)
-        }
-        if parts.count == 4 && octets.count == 4 && octets.allSatisfy({ (0...255).contains($0) }) {
-            return octets[0] == 10
-                || (octets[0] == 100 && (64...127).contains(octets[1])) // Tailscale / shared-address space
-                || (octets[0] == 172 && (16...31).contains(octets[1]))
-                || (octets[0] == 192 && octets[1] == 168)
-                || (octets[0] == 169 && octets[1] == 254)
-        }
-        return host.contains(":") && (host.hasPrefix("fc") || host.hasPrefix("fd") || host.hasPrefix("fe80:"))
     }
 
     private static func pathComponent(_ value: String) -> String {

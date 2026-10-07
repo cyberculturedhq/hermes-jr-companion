@@ -25,6 +25,7 @@
 				"INFOPLIST_FILE" = "Hermes/Info.plist";
 				"TARGETED_DEVICE_FAMILY" = "1,2";
 				"APNS_ENVIRONMENT" = "development";
+				"APP_ATTEST_ENVIRONMENT" = "development";
 				"GENERATE_INFOPLIST_FILE" = "NO";
 				"ENABLE_PREVIEWS" = "YES";
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";
@@ -168,6 +169,7 @@
 				"INFOPLIST_FILE" = "Hermes/Info.plist";
 				"TARGETED_DEVICE_FAMILY" = "1,2";
 				"APNS_ENVIRONMENT" = "production";
+				"APP_ATTEST_ENVIRONMENT" = "production";
 				"GENERATE_INFOPLIST_FILE" = "NO";
 				"ENABLE_PREVIEWS" = "YES";
 				"SUPPORTED_PLATFORMS" = "iphoneos iphonesimulator";

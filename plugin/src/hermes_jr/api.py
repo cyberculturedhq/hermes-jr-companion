@@ -2,6 +2,7 @@
 from __future__ import annotations
 import re
 import uuid
+import json
 import aiohttp
 from fastapi import APIRouter, HTTPException, Request
 from .service import Service, client_session
@@ -9,9 +10,50 @@ from .state import State
 from .updates import public_status
 from .mobile import negotiate
 from .bot_replies import supported as bot_replies_supported
+from .storage import StorageCapacityError
 
 PREFIX = "/api/plugins/hermes-jr"
 router = APIRouter()
+
+
+async def read_body(request: Request, limit: int):
+    """Stop before retaining a chunk that exceeds the operation's byte limit."""
+    length = request.headers.get('content-length')
+    if length is not None:
+        if not re.fullmatch(r'[0-9]+', length):
+            raise HTTPException(400, 'Invalid Content-Length')
+        if int(length) > limit:
+            raise HTTPException(413, 'Request too large')
+    raw = bytearray()
+    async for chunk in request.stream():
+        if len(raw) + len(chunk) > limit:
+            raise HTTPException(413, 'Request too large')
+        raw.extend(chunk)
+    body = json.loads(raw) if raw else {}
+    if not isinstance(body, dict):
+        raise ValueError('Expected a JSON object')
+    return body
+
+
+def body_limit(rest: str, method: str):
+    """Validate the complete operation before reading its body."""
+    methods = {
+        'uploads': {'PUT'}, 'session-handoff': {'GET', 'PUT'},
+        'mobile/capabilities': {'GET'}, 'capabilities': {'GET'},
+        'devices/self/notification-scope': {'GET', 'PUT'},
+        'follows': {'GET', 'PUT', 'DELETE'}, 'presence': {'PUT'},
+        'devices/self/push': {'PUT', 'DELETE'},
+    }.get(rest)
+    limit = 720_000 if rest == 'uploads' else 4096
+    if re.fullmatch(r'bot-replies/[0-9a-f-]{36}', rest):
+        methods, limit = {'GET', 'PUT', 'DELETE'}, 2_000_000
+    elif re.fullmatch(r'update-requests/[0-9a-f-]{36}', rest):
+        methods = {'GET', 'PUT'}
+    elif re.fullmatch(r'notifications/[A-Za-z0-9_-]{32,64}', rest):
+        methods = {'GET'}
+    if methods is None or method not in methods:
+        raise LookupError('Unknown companion operation')
+    return limit if method == 'PUT' else 0
 
 
 def coordinate(body):
@@ -115,13 +157,8 @@ async def capabilities():
 @router.post("/v1/enroll")
 async def enroll(request: Request):
     # The Hermes auth middleware has authenticated this request before our router executes.
-    raw = await request.body()
-    if len(raw) > 4096:
-        raise HTTPException(413, "Request too large")
     try:
-        body = await request.json()
-        if not isinstance(body, dict):
-            raise ValueError("Expected a JSON object")
+        body = await read_body(request, 4096)
         name = body.get("device_name", "iPhone")
         if not isinstance(name, str) or not 1 <= len(name) <= 80:
             raise ValueError("Invalid device name")
@@ -143,18 +180,15 @@ async def endpoint(rest: str, request: Request):
         state = State()
         device_id = request.headers.get("x-hermes-jr-device", "")
         state.authenticate(device_id, request.headers.get("x-hermes-jr-token", ""))
-        raw = await request.body()
-        limit = 2_000_000 if rest.startswith('bot-replies/') else 720_000 if rest == 'uploads' else 4096
-        if len(raw) > limit:
-            raise HTTPException(413, "Request too large")
-        body = await request.json() if raw else {}
-        if not isinstance(body, dict):
-            raise ValueError("Expected a JSON object")
+        limit = body_limit(rest, request.method)
+        body = await read_body(request, limit) if limit else {}
         async with client_session() as client:
             return await handle(state, device_id, request.method, "/v1/" + rest, body, dict(request.query_params), client)
     except PermissionError:
         raise HTTPException(401, "Device is not authorized") from None
     except LookupError:
         raise HTTPException(404, "Companion operation or notification not found") from None
+    except StorageCapacityError as error:
+        raise HTTPException(507, str(error)) from None
     except (ValueError, TypeError):
         raise HTTPException(400, "Invalid companion request or service unavailable") from None

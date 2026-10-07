@@ -30,7 +30,7 @@ Your Hermes computer and paired iPhone handle the private content. Our relay del
 
 Encryption does not hide everything: the delivery services still see network/delivery metadata, random routing identifiers, and push tokens. Decrypted previews are visible to iOS and follow your lock-screen notification settings. Your Hermes model provider still processes the requests you send to it.
 
-Rich push previews require the updated iOS app and companion, with key setup over the encrypted relay or HTTPS. Older versions and plain HTTP connections receive generic alerts. We have automated security tests, but **no independent security audit yet**.
+Rich push previews require the updated iOS app and companion, with key setup over the encrypted relay or HTTPS. Older versions receive generic alerts. Direct phone connections require HTTPS. Encrypted companion mode keeps the backend private on the computer. We have automated security tests, but **no independent security audit yet**.
 
 Read [how notification encryption works](Protocol/NOTIFICATIONS.md) and the [relay encryption protocol](Protocol/HPKE.md).
 

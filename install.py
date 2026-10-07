@@ -283,7 +283,7 @@ def reuse(installed):
                       'reused': True, 'next_step': HANDOFF}), flush=True)
 
 
-def install(update=False, receipt=None, complete=False):
+def install(update=False, receipt=None, complete=False, setup_ticket=None):
     if complete and (update or receipt):
         raise ValueError('Use --update and --complete-install as separate steps.')
     if receipt and (not update or not re.fullmatch(r'[A-Za-z0-9_-]{1,2048}', receipt)):
@@ -437,9 +437,10 @@ def install(update=False, receipt=None, complete=False):
         raise
     # New subprocesses import the installed package, never the previous in-memory version.
     state = json.loads(run(['-m', 'hermes_jr.cli', 'status'], capture=True))
-    if not state.get('service_url'):
+    if not state.get('service_url') or not state.get('installation_id'):
         run(['-m', 'hermes_jr.cli', 'setup', '--service', 'https://hermes-jr-companion.cybercultured.com',
-             '--dashboard', 'http://127.0.0.1:9119', '--relay', '--push'])
+             '--dashboard', 'http://127.0.0.1:9119', '--relay', '--push',
+             *(['--ticket', setup_ticket] if setup_ticket else [])])
     elif not state.get('relay_enabled'):
         raise ValueError('Remote access is disabled in the existing configuration. Enable it explicitly before ticket pairing.')
     backend = json.loads(run(['-m', 'hermes_jr.cli', 'backend', 'status'], capture=True))
@@ -463,6 +464,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--update', action='store_true', help='Install an explicitly requested update when Hermes work is idle')
     parser.add_argument('--receipt', help='Opaque Hermes Jr. update receipt; requires --update')
+    parser.add_argument('--setup-ticket', help="Use the phone's public setup ticket for first installation")
     parser.add_argument('--complete-install', action='store_true', help='Complete a stopped initial installation of the current signed release across profiles')
     args = parser.parse_args()
     python = hermes_python()
@@ -477,7 +479,7 @@ def main():
     with (directory / 'install.lock').open('a') as handle:
         try: fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError: raise ValueError('Another Hermes Jr installer is running.') from None
-        install(update=args.update, receipt=args.receipt, complete=args.complete_install)
+        install(update=args.update, receipt=args.receipt, complete=args.complete_install, setup_ticket=args.setup_ticket)
 
 
 if __name__ == '__main__':

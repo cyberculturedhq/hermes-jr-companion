@@ -8,6 +8,7 @@ import logging
 import time
 import uuid
 import aiohttp
+from .storage import StorageCapacityError
 from .gateway import Gateway, LocalPeer, validate_rpc
 from .secure_channel import HostHandshake
 from .service import Service
@@ -112,6 +113,8 @@ class Peer:
                 status, body = 403, {"detail": "Operation is not allowed"}
             except LookupError:
                 status, body = 404, {"detail": "Operation or notification not found"}
+            except StorageCapacityError as error:
+                status, body = 507, {"detail": str(error)}
             except (ValueError, TypeError):
                 status, body = 400, {"detail": "Invalid request or companion service configuration"}
             except (aiohttp.ClientError, asyncio.TimeoutError, TimeoutError):

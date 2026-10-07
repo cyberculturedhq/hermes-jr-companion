@@ -19,21 +19,21 @@ npm run build
 npm run dev -- --port 8787
 ```
 
-`build` runs `wrangler deploy --dry-run`; it does not deploy. Wrangler/Miniflare need permission to open localhost sockets. `.dev.vars` is optional for runtime operation; the empty example documents the four optional secret bindings and lets `wrangler types` generate their types. Do not overwrite an existing secret file when repeating setup.
+`build` runs `wrangler deploy --dry-run`; it does not deploy. Wrangler/Miniflare need permission to open localhost sockets. `.dev.vars` is optional for runtime operation; the empty example documents the secret binding names and lets `wrangler types` generate their types. Do not overwrite an existing secret file when repeating setup.
 
 The test suite runs inside workerd against real SQLite Durable Objects and hibernatable WebSockets. It tests credential isolation, device revocation, concurrent device limits, actual rate-limit bindings, opaque byte forwarding, hibernation, socket/record/rate limits, and mocked APNs delivery. Tests generate an ephemeral local signing key and mock outbound `fetch`; no notification reaches Apple.
 
 ## HTTP contract, version 1
 
-Production requests use HTTPS/WSS. Local HTTP is accepted only for `localhost`, `127.0.0.1`, and `[::1]`. All authenticated endpoints use `Authorization: Bearer <token>`; tokens in URLs are rejected. JSON bodies require `Content-Type: application/json`, are limited to 4096 bytes including chunked requests, and reject unknown fields. This API serves native clients; requests carrying a browser `Origin` header are rejected and CORS is not enabled.
+Production requests use HTTPS/WSS. Local HTTP is accepted only for `localhost`, `127.0.0.1`, and `[::1]`. All authenticated endpoints use `Authorization: Bearer <token>`; tokens in URLs are rejected. JSON bodies require `Content-Type: application/json`, are limited to 4096 bytes including chunked requests, except verified intent creation at 36,864 bytes, and reject unknown fields. This API serves native clients; requests carrying a browser `Origin` header are rejected and CORS is not enabled.
 
-IDs are random canonical lowercase UUIDv4 strings. Tokens contain 32 cryptographically random bytes encoded as 43 unpadded base64url characters; only SHA-256 hashes are stored. Credentials are returned once. Losing the host token requires registering a new installation. Keep it on the Hermes machine. Give the phone only its device routing credential through the authenticated pairing flow.
+IDs are random canonical lowercase UUIDv4 strings. Tokens contain 32 cryptographically random bytes encoded as 43 unpadded base64url characters; only SHA-256 hashes are stored. New device credentials are returned once. Verified registration retries retain the same installation and host token. Losing the host token requires registering a new installation. Keep it on the Hermes machine. Give the phone only its device routing credential through the authenticated pairing flow.
 
 | Method / path | Authority | Body | Success |
 | --- | --- | --- | --- |
 | `GET /health` | Public | — | `200 {"status":"ok"}` |
 | `GET /v1/capabilities` | Public | — | `200 {"protocol_version":1,"push":false,"max_ciphertext_bytes":65536}`; `push` reflects server configuration |
-| `POST /v1/installations` | Public, rate limited | `{}` | `201 {"installation_id":"UUID","host_token":"TOKEN"}` |
+| `POST /v1/installations` | Verified phone ticket, rate limited | `{"setup_ticket":"HJ1...","host_token":"PRIVATE_HOST_TOKEN"}` | `201 {"installation_id":"UUID","host_token":"TOKEN"}` |
 | `POST /v1/installations/:installation/devices` | Host | `{}` | `201 {"device_id":"UUID","device_token":"TOKEN"}` |
 | `GET /v1/installations/:installation/devices` | Host | — | `200 {"devices":[{"device_id":"UUID","push_registered":false,"connected":false}]}` |
 | `DELETE /v1/installations/:installation/devices/:device` | Host | — | `200 {"status":"revoked"}`; immediately closes that device and removes its push registration |
@@ -94,7 +94,7 @@ Encrypted preview requests may additionally include `encrypted: {v: 1, kid, data
 
 The topic and endpoint are server controlled; only Apple's production/sandbox endpoints can be used. Notifications expire after an hour and share a generic collapse identifier. Apple acceptance is not confirmed display or delivery. The app must reconnect and reconcile actual state when opened.
 
-The same reference/device pair is sent to APNs at most once within 24 hours; repeats return `202 {"status":"accepted","duplicate":true}` or the stored `pending`/`failed`/`unregistered` state. APNs errors return `502 {"status":"failed"}` or `unregistered`. Status 410 clears the exact obsolete device token, without clearing a newer registration that arrived during the request. Ambiguous network failures are not automatically retried. Creating another reference can cause a duplicate user alert and should be a deliberate host decision.
+The same reference/device pair is sent to APNs at most once within 24 hours; repeats return `202 {"status":"accepted","duplicate":true}` or the stored `pending`/`failed`/`unregistered` state. APNs errors return `502 {"status":"failed"}` or `unregistered`. Status 410 and terminal device-token reasons clear the exact obsolete device token, without clearing a newer registration that arrived during the request. Ambiguous network failures are not automatically retried. Creating another reference can cause a duplicate user alert and should be a deliberate host decision.
 
 The host can read a receipt to distinguish signing failures, transport failures,
 and Apple's response. Only a fixed stage, HTTP status, and allowlisted Apple reason
@@ -119,7 +119,7 @@ Each installation allows 16 device records including pending pairing offers and 
 | Push attempts across installation | 30/minute, 300/day |
 | Push attempts per device | 6/minute |
 
-The public registration endpoint additionally uses Cloudflare's real rate-limit binding (5/minute per ingress IP); authenticated ingress has another binding at 120 requests/minute/IP. Missing bindings return 503 instead of bypassing limits. Local tests exercise the registration limit. These edge limits are approximate and per Cloudflare location, not a global spending cap; shared IPs may share a limit. Before public launch, use account budget alerts and edge abuse controls suitable for an account-free registration endpoint. The application never trusts a client-supplied forwarding address. `CF-Connecting-IP` must be supplied by Cloudflare ingress; do not place an untrusted proxy in front that permits spoofing it.
+The public registration endpoint additionally uses Cloudflare's real rate-limit binding (5/minute per ingress IP); authenticated ingress has another binding at 120 requests/minute/IP. Missing bindings return 503 instead of bypassing limits. Local tests exercise the registration limit. These edge limits are approximate and per Cloudflare location, not a global spending cap; shared IPs may share a limit. Before public launch, use account budget alerts and edge abuse controls suitable for an verified registration endpoint. The application never trusts a client-supplied forwarding address. `CF-Connecting-IP` must be supplied by Cloudflare ingress; do not place an untrusted proxy in front that permits spoofing it.
 
 Cloudflare observes network metadata, random installation/device identifiers, record sizes/timing, and APNs device tokens/environment. The installation DO stores token hashes, device registrations, counters, and expiring opaque push references/statuses. It does not store relay records, host URLs, user names, or conversation data. Explicit deletion erases installation records; there is no general historical message store. Automatic invocation logging and preview URLs are disabled so paths/identifiers are not captured by default. Enable any future operational telemetry only with explicit field redaction and retention rules.
 
@@ -162,3 +162,5 @@ limitations, signing-key rotation behavior, and validation.
 ### Separate APNs environment keys
 
 `APNS_KEY_ID` and `APNS_PRIVATE_KEY` remain the base credentials (sandbox on the hosted service). To use a separate production-only, topic-specific Apple key, set both optional secrets `APNS_PRODUCTION_KEY_ID` and `APNS_PRODUCTION_PRIVATE_KEY`, then set `APNS_ENVIRONMENT` to `both`. The production key must allow `APNS_TOPIC` and belong to `APNS_TEAM_ID`. A partial production override fails closed; it never falls back to the sandbox key. Without either override, existing self-hosted dual-environment keys retain their current behavior. Provider tokens are cached separately by signing key, including across Durable Object restarts.
+
+Public admission requires automatic Apple verification. See [Apple configuration](../Protocol/APPLE-SETUP.md). A self-hosted private service can explicitly set `APP_ATTEST_MODE=off` and retain the legacy `{}` registration contract. Do not use this bypass on the official public hostname.

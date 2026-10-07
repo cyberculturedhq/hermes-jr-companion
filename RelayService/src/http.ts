@@ -4,6 +4,20 @@ export class HttpError extends Error {
   constructor(readonly status: number, readonly code: string) { super(code); }
 }
 
+export type RpcResult<T> = { value: T } | { error: {status: number; code: string} };
+// RPC does not preserve custom error prototypes. Send only fixed domain errors.
+export async function rpcResult<T>(work: () => T | Promise<T>): Promise<RpcResult<T>> {
+  try { return {value: await work()}; }
+  catch (error) {
+    if (error instanceof HttpError) return {error: {status: error.status, code: error.code}};
+    return {error: {status: 500, code: "internal_error"}};
+  }
+}
+export function unwrap<T>(result: RpcResult<T>): T {
+  if ("error" in result) throw new HttpError(result.error.status, result.error.code);
+  return result.value;
+}
+
 export function json(body: unknown, status = 200): Response {
   return Response.json(body, { status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
 }
@@ -15,12 +29,12 @@ export function failure(status: number, code: string): Response {
 }
 
 /** Read even chunked bodies under a hard cap; never trust Content-Length alone. */
-export async function readJson(request: Request): Promise<Record<string, unknown>> {
+export async function readJson(request: Request, limit: number = LIMITS.jsonBytes): Promise<Record<string, unknown>> {
   if (!request.headers.get("Content-Type")?.toLowerCase().startsWith("application/json")) {
     throw new HttpError(415, "json_required");
   }
   const length = request.headers.get("Content-Length");
-  if (length && Number(length) > LIMITS.jsonBytes) throw new HttpError(413, "body_too_large");
+  if (length && Number(length) > limit) throw new HttpError(413, "body_too_large");
   const reader = request.body?.getReader();
   if (!reader) throw new HttpError(400, "invalid_json");
   const chunks: Uint8Array[] = [];
@@ -30,7 +44,7 @@ export async function readJson(request: Request): Promise<Record<string, unknown
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > LIMITS.jsonBytes) {
+      if (total > limit) {
         await reader.cancel();
         throw new HttpError(413, "body_too_large");
       }

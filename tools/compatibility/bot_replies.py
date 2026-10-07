@@ -24,6 +24,7 @@ def check():
         home.mkdir()
         state = State(Path(directory) / 'companion')
         device = str(uuid.uuid4())
+        state.add_device(device, 'Test phone', 'fixture-token', paired=True)
         db = SessionDB(db_path=home / 'state.db')
         db.create_session(session_id='bot-root', source='cli')
         db.set_session_title('bot-root', 'Bot Chat')

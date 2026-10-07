@@ -61,8 +61,15 @@ private struct SavedSetup: Codable {
 
 struct SetupHTTPError: LocalizedError {
     let status: Int
+    var code: String? = nil
     var errorDescription: String? {
-        switch status {
+        if code == "app_verification_key_limit" {
+            return "This device created too many app verification keys. Keep the app installed. Existing connections remain available. Try new setup later."
+        }
+        if code == "app_verification_unavailable" {
+            return "App verification is unavailable. Try new setup later. Existing connections remain available."
+        }
+        return switch status {
         case 503: "Pairing is unavailable at the service. Please try again later."
         case 404: "This setup attempt is no longer available. Create a fresh setup prompt."
         case 410: "This setup attempt expired. Create a fresh setup prompt."
@@ -103,7 +110,17 @@ final class SetupHTTPClient: SetupNetworking {
         if let ticket { request.setValue(ticket, forHTTPHeaderField: "X-Hermes-Setup") }
         let (bytes, response) = try await session.bytes(for: request)
         guard let response = response as? HTTPURLResponse else { throw CompanionCryptoError.invalidHandshake }
-        guard (200..<300).contains(response.statusCode) else { bytes.task.cancel(); throw SetupHTTPError(status: response.statusCode) }
+        guard (200..<300).contains(response.statusCode) else {
+            var data = Data()
+            for try await byte in bytes {
+                if data.count >= 4096 { bytes.task.cancel(); break }
+                data.append(byte)
+            }
+            let fields = try? JSONDecoder().decode([String: String].self, from: data)
+            let allowed = ["app_verification_key_limit", "app_verification_unavailable"]
+            let code = (fields?["error"]).flatMap { allowed.contains($0) ? $0 : nil }
+            throw SetupHTTPError(status: response.statusCode, code: code)
+        }
         var data = Data()
         for try await byte in bytes {
             guard data.count < 16_384 else { bytes.task.cancel(); throw CompanionCryptoError.messageTooLarge }
@@ -117,6 +134,7 @@ final class SetupHTTPClient: SetupNetworking {
 final class SetupPairing {
     nonisolated static let service = "https://hermes-jr-companion.cybercultured.com"
     private let network: any SetupNetworking
+    private let appVerification: any AppVerifying
     private let account: String
     private let service: String
     private var pending: SavedSetup?
@@ -157,8 +175,9 @@ final class SetupPairing {
         pending.map { $0.prompt ?? HermesCompanionSetup.prompt(ticket: $0.ticket) }
     }
 
-    init(network: (any SetupNetworking)? = nil, account: String = "setup/pending/v1", service: String = SetupPairing.service) {
+    init(network: (any SetupNetworking)? = nil, account: String = "setup/pending/v1", service: String = SetupPairing.service, appVerification: (any AppVerifying)? = nil) {
         self.network = network ?? SetupHTTPClient(); self.account = account; self.service = service
+        self.appVerification = appVerification ?? AppAttestClient()
         _ = restorePending()
     }
 
@@ -203,12 +222,16 @@ final class SetupPairing {
         let attempt = revision
         defer { busy = false }
         do {
-            let privateKey = CompanionCrypto.generatePrivateKey()
+            let privateKey = try CredentialStore.readValue(Data.self, account: account + "/admission") ?? CompanionCrypto.generatePrivateKey()
+            try CredentialStore.saveValue(privateKey, account: account + "/admission")
             let phoneKey = try CompanionCrypto.publicKey(for: privateKey).companionBase64
             let issuerData = try await network.request(service: service, path: "/v1/pairing/key", method: "GET", body: nil, token: nil, ticket: nil)
             let issuer = try JSONDecoder().decode([String: String].self, from: issuerData)
+            let body = issuer["app_attest"] == "required"
+                ? try await appVerification.proof(service: service, phoneKey: phoneKey, network: network)
+                : try JSONEncoder().encode(["phone_public_key": phoneKey])
             let data = try await network.request(service: service, path: "/v1/pairing/intents", method: "POST",
-                body: JSONEncoder().encode(["phone_public_key": phoneKey]), token: nil, ticket: nil)
+                body: body, token: nil, ticket: nil)
             struct Created: Decodable { let ticket: String; let owner_token: String; let prompt: String? }
             let created = try JSONDecoder().decode(Created.self, from: data)
             let verified = try SetupTicket.verify(created.ticket, publicKey: issuer["public_key"] ?? "", service: service)
@@ -221,6 +244,8 @@ final class SetupPairing {
             guard attempt == revision, !Task.isCancelled else { return }
             try save(SavedSetup(service: service, ticket: created.ticket, prompt: created.prompt, intentID: verified.intentID,
                 ownerToken: created.owner_token, phonePrivate: privateKey, expiresAt: verified.expiresAt))
+            CredentialStore.delete(account: account + "/admission")
+            try appVerification.didIssueTicket(service: service)
         } catch {
             if attempt == revision {
                 promptServiceUnavailable = (error as? SetupHTTPError)?.status == 503
@@ -371,6 +396,8 @@ final class SetupPairing {
     func cancel() {
         let previous = pending
         clear()
+        CredentialStore.delete(account: account + "/admission")
+        try? appVerification.didIssueTicket(service: service)
         if let previous { Task { _ = try? await call(previous, "POST", "/cancel", body: [:]) } }
     }
     private func clear() {

@@ -21,16 +21,20 @@ private final class SetupFixtureBroker: SetupNetworking {
     var pausedRead: CheckedContinuation<Void, Never>?
     var confirmations = 0
     var phoneKeys: [String] = []
+    var requiresVerification = false
+    var failIntent = false
     let service = "https://relay.test"
 
     func request(service: String, path: String, method: String, body: Data?, token: String?, ticket: String?) async throws -> Data {
         func json(_ value: Any) throws -> Data { try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) }
         let fields = try body.map { try JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
         if path.hasSuffix("/key") && path == "/v1/pairing/key" {
-            return try json(["public_key": signer.publicKey.rawRepresentation.companionBase64])
+            return try json(["public_key": signer.publicKey.rawRepresentation.companionBase64,
+                             "app_attest": requiresVerification ? "required" : "off"])
         }
         if path == "/v1/pairing/intents" {
             phoneKey = fields["phone_public_key"]!
+            if failIntent { failIntent = false; throw URLError(.networkConnectionLost) }
             let now = Int(Date.now.timeIntervalSince1970)
             let payload = try json([1, intent, phoneKey, now, now + 1200, service]).companionBase64
             let unsigned = "HJ1." + payload
@@ -83,10 +87,50 @@ private final class SetupFixtureBroker: SetupNetworking {
 }
 
 @MainActor
+private final class AppVerificationFixture: AppVerifying {
+    var phones: [String] = []
+    var rejected = false
+    var issued = 0
+    func proof(service: String, phoneKey: String, network: any SetupNetworking) async throws -> Data {
+        phones.append(phoneKey)
+        if rejected { throw HermesError.message("This device cannot verify the official app for new setup.") }
+        return try JSONEncoder().encode(["phone_public_key": phoneKey])
+    }
+    func didIssueTicket(service: String) throws { issued += 1 }
+}
+
+@MainActor
 final class SetupPairingTests: XCTestCase {
     private var account = ""
     override func setUp() { account = "setup-test/" + UUID().uuidString }
-    override func tearDown() { CredentialStore.delete(account: account) }
+    override func tearDown() { CredentialStore.delete(account: account); CredentialStore.delete(account: account + "/admission") }
+
+    func testAutomaticAppVerificationKeepsPhoneIdentityAfterLostResponse() async {
+        let broker = SetupFixtureBroker(), verification = AppVerificationFixture()
+        broker.requiresVerification = true; broker.failIntent = true
+        let pairing = SetupPairing(network: broker, account: account, service: broker.service, appVerification: verification)
+        await pairing.prepare()
+        XCTAssertFalse(pairing.hasAttempt)
+        await pairing.prepare()
+        XCTAssertNil(pairing.error)
+        XCTAssertTrue(pairing.hasAttempt)
+        XCTAssertEqual(verification.phones.count, 2)
+        XCTAssertEqual(verification.phones[0], verification.phones[1])
+        XCTAssertEqual(verification.issued, 1)
+        await pairing.refresh()
+        XCTAssertFalse(pairing.hasSelection)
+        XCTAssertEqual(broker.confirmations, 0)
+    }
+
+    func testUnsupportedVerificationStopsNewSetupWithoutIssuingTicket() async {
+        let broker = SetupFixtureBroker(), verification = AppVerificationFixture()
+        broker.requiresVerification = true; verification.rejected = true
+        let pairing = SetupPairing(network: broker, account: account, service: broker.service, appVerification: verification)
+        await pairing.prepare()
+        XCTAssertFalse(pairing.hasAttempt)
+        XCTAssertTrue(broker.ticket.isEmpty)
+        XCTAssertTrue(pairing.error?.contains("cannot verify") == true)
+    }
 
     private func ready(_ broker: SetupFixtureBroker) async -> SetupPairing {
         let pairing = SetupPairing(network: broker, account: account, service: broker.service)
