@@ -1,3 +1,15 @@
+## 0.19.0
+
+- Add automatic Apple app verification for public setup. Keep the existing numeric comparison.
+- Protect relay request and push capacity. Erase abandoned setup registrations.
+- Start updates through trusted installed code. Keep guided update receipts.
+- Require HTTPS for direct iPhone connections. Keep saved settings for recovery.
+- Bound upload and reply storage. Preserve completed attachments and delivery records.
+- Bound local API request bodies. Authenticate before protected body reads.
+- Scan public files and full Git history for secrets.
+
+The matching iOS app is version `0.1.1`, build `5`. Apple verification requires private service keys and physical-device checks before public enforcement. See [Apple configuration](Protocol/APPLE-SETUP.md), [relay operations](RelayService/OPERATIONS.md), and [storage limits](plugin/STORAGE.md).
+
 ## 0.18.1
 
 - Preserve local plugin edits made while an update or rollback stops the service.
