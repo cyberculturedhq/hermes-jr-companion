@@ -1,3 +1,11 @@
+## 0.19.1
+
+- Use Python 3.14 to check current Hermes releases and development versions.
+- Test native pairing panels through the gateway used by newer Hermes CLI versions.
+- Keep compatibility checks for both older reference versions.
+
+This maintenance release changes compatibility tests and release metadata. It does not change companion behavior. No iOS update or relay deployment is required.
+
 ## 0.19.0
 
 - Add automatic Apple app verification for public setup. Keep the existing numeric comparison.
