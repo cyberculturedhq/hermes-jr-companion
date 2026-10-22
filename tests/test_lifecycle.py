@@ -120,15 +120,15 @@ class UpdateTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.version_patch.stop)
 
     async def test_new_release_uses_only_fixed_origin_and_commit(self):
-        fetch = AsyncMock(side_effect=[{'tag_name': 'v0.3.0', 'body': body()}, {'object': {'type': 'commit', 'sha': 'a'*40}}])
+        fetch = AsyncMock(return_value={'schema':1, 'version':'0.3.0', 'commit':'a'*40, 'signature':body().split(': ')[1].split(' ')[0]})
         with patch('hermes_jr.updates.get_json', fetch):
             result = await check(self.state, None)
             again = await check(self.state, None)
         self.assertEqual(result['state'], 'available')
         self.assertEqual(result['commit'], 'a'*40)
         self.assertEqual(again, result)
-        self.assertEqual(fetch.await_count, 2)
-        self.assertTrue(all(call.args[1].startswith('https://api.github.com/repos/cyberculturedhq/hermes-jr-companion/') for call in fetch.await_args_list))
+        self.assertEqual(fetch.await_count, 1)
+        self.assertTrue(all(call.args[1] == 'https://hermes-jr-companion.cybercultured.com/v1/companion-release' for call in fetch.await_args_list))
 
     async def test_missing_release_and_network_failure_do_not_crash_bridge(self):
         with patch('hermes_jr.updates.get_json', AsyncMock(return_value=None)):
@@ -153,10 +153,13 @@ class UpdateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['state'], 'unavailable')
         self.assertNotIn('private details', json.dumps(result))
 
-    async def test_annotated_release_tag_resolves_commit(self):
-        fetch = AsyncMock(side_effect=[{'tag_name':'v0.3.0', 'body': body()}, {'object':{'type':'tag','sha':'b'*40}}, {'object':{'type':'commit','sha':'a'*40}}])
-        with patch('hermes_jr.updates.get_json', fetch):
-            self.assertEqual((await check(self.state, None))['commit'], 'a'*40)
+    async def test_tampered_feed_is_unavailable_without_fallback(self):
+        for change in [{'commit':'b'*40}, {'version':'0.4.0'}, {'schema':2}, {'url':'https://evil.test'}]:
+            value = {'schema':1, 'version':'0.3.0', 'commit':'a'*40, 'signature':body().split(': ')[1].split(' ')[0], **change}
+            fetch = AsyncMock(return_value=value)
+            with patch('hermes_jr.updates.get_json', fetch):
+                self.assertEqual((await check(self.state, None, force=True))['state'], 'unavailable')
+            self.assertEqual(fetch.await_count, 1)
 
     def test_prereleases_and_commands_are_not_versions(self):
         for text in ('v1.2.3-beta', '1.2', 'v1.2.3;sh', '01.2.3'):

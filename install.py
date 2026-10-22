@@ -21,7 +21,7 @@ import urllib.error
 
 REPO = 'cyberculturedhq/hermes-jr-companion'
 SOURCE = 'https://github.com/' + REPO + '.git#plugin'
-API = 'https://api.github.com/repos/' + REPO
+FEED = 'https://hermes-jr-companion.cybercultured.com/v1/companion-release'
 PUBLIC_KEY = 'ac072d31db546d1f241ac1ace40cb0b474bd4e833d78385cb9f03499e44778af'
 RELEASE_MINIMUM = (0, 17, 0)
 
@@ -123,18 +123,16 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def get_json(path):
-    request = urllib.request.Request(API + path, headers={'User-Agent': 'hermes-jr-installer', 'Accept': 'application/vnd.github+json'})
+def get_json():
+    request = urllib.request.Request(FEED, headers={'User-Agent': 'hermes-jr-installer', 'Accept': 'application/json'})
     try:
         with urllib.request.build_opener(NoRedirect).open(request, timeout=20) as response:
-            raw = response.read(128001)
-            if len(raw) > 128000:
+            raw = response.read(4097)
+            if len(raw) > 4096:
                 raise ValueError('Release response is too large.')
             return json.loads(raw)
     except urllib.error.HTTPError as error:
-        if error.code == 429 or (error.code == 403 and (error.headers or {}).get('X-RateLimit-Remaining') == '0'):
-            raise ValueError('GitHub release lookup is rate limited. Wait for the GitHub rate limit to reset; do not patch or repeatedly rerun the installer.') from None
-        raise ValueError(f'GitHub release lookup failed with HTTP {error.code}. Keep the installation and report this error.') from None
+        raise ValueError(f'The update service returned HTTP {error.code}. Keep the installation and try again later.') from None
 
 
 def native_command(command, *, env, log, requirement, timeout=300, report_progress=False):
@@ -218,28 +216,19 @@ def native_command(command, *, env, log, requirement, timeout=300, report_progre
 
 def release():
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-    data = get_json('/releases/latest')
-    tag = data['tag_name']
-    if data.get('draft') or data.get('prerelease') or version(tag) < RELEASE_MINIMUM:
+    data = get_json()
+    if not isinstance(data, dict) or set(data) != {'schema', 'version', 'commit', 'signature'} or type(data['schema']) is not int or data['schema'] != 1:
+        raise ValueError('Invalid release information.')
+    tag, commit, signature = data['version'], data['commit'], data['signature']
+    if not isinstance(tag, str) or len(tag) > 32 or tag.startswith('v') or version(tag) < RELEASE_MINIMUM:
         raise ValueError('The required stable release is not published yet. Keep the current installation.')
-    obj = get_json('/git/ref/tags/' + tag)['object']
-    for _ in range(4):
-        commit = obj['sha']
-        if not re.fullmatch('[0-9a-f]{40}', commit):
-            raise ValueError('Invalid release commit.')
-        if obj['type'] == 'commit':
-            break
-        if obj['type'] != 'tag':
-            raise ValueError('Invalid release tag.')
-        obj = get_json('/git/tags/' + commit)['object']
-    else:
-        raise ValueError('Too many release tag indirections.')
-    signatures = re.findall(r'<!-- hermes-jr-release-v1: ([A-Za-z0-9+/]{86}==) -->', data.get('body') or '')
-    if len(signatures) != 1:
-        raise ValueError('Release signature is missing or ambiguous.')
-    message = f'hermes-jr-release-v1\n{REPO}\n{tag.lstrip("v")}\n{commit}\n'.encode()
-    Ed25519PublicKey.from_public_bytes(bytes.fromhex(PUBLIC_KEY)).verify(base64.b64decode(signatures[0], validate=True), message)
-    return {'latest': tag.lstrip('v'), 'commit': commit, 'signature': signatures[0], 'state': 'available'}
+    if not isinstance(commit, str) or not re.fullmatch('[0-9a-f]{40}', commit):
+        raise ValueError('Invalid release commit.')
+    if not isinstance(signature, str) or not re.fullmatch(r'[A-Za-z0-9+/]{86}==', signature):
+        raise ValueError('Release signature is missing or invalid.')
+    message = f'hermes-jr-release-v1\n{REPO}\n{tag}\n{commit}\n'.encode()
+    Ed25519PublicKey.from_public_bytes(bytes.fromhex(PUBLIC_KEY)).verify(base64.b64decode(signature, validate=True), message)
+    return {'latest': tag, 'commit': commit, 'signature': signature, 'state': 'available'}
 
 
 def profiles():

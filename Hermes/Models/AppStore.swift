@@ -221,6 +221,7 @@ extension AppStore {
     func refreshCompanionUpdate(force: Bool = false) async {
         guard let context = notificationContext(), !checkingCompanionUpdate else { return }
         checkingCompanionUpdate = true
+        if force { updateCheckMessage = nil }
         defer { checkingCompanionUpdate = false }
         do {
             let capabilities = try await context.client.companionAPI("capabilities")
@@ -272,17 +273,34 @@ extension AppStore {
                 UserDefaults.standard.removeObject(forKey: context.account + "/update-request")
             }
             if installedCompanionVersion != nil && (force || update["checks_enabled"] as? Bool != false) {
-                let release = try await CompanionReleaseFeed.shared.latest(force: force)
-                guard isCurrent(context) else { return }
-                if let installed = installedCompanionVersion {
-                    companionUpdate = CompanionUpdateNotice(installed: installed, latest: release.version)
+                do {
+                    let release = try await CompanionReleaseFeed.shared.latest(force: force)
+                    guard isCurrent(context) else { return }
+                    applyCompanionRelease(.success(release))
+                } catch {
+                    guard isCurrent(context) else { return }
+                    applyCompanionRelease(.failure(error))
                 }
-                updateCheckMessage = companionUpdate == nil ? "Your companion is up to date." : nil
             } else {
                 updateCheckMessage = "Automatic update checks are disabled on this Hermes host."
             }
         } catch {
-            if force, isCurrent(context) { updateCheckMessage = "Couldn’t check for updates. Check the connection and try again." }
+            if force, isCurrent(context) {
+                companionUpdate = nil
+                updateCheckMessage = "Could not reach Hermes. Check the connection and try again."
+            }
+        }
+    }
+
+    func applyCompanionRelease(_ result: Result<CompanionRelease, Error>) {
+        switch result {
+        case .success(let release):
+            companionUpdate = installedCompanionVersion.flatMap { CompanionUpdateNotice(installed: $0, latest: release.version) }
+            updateCheckMessage = companionUpdate == nil ? "Your companion is up to date." : nil
+        case .failure(let error):
+            // A saved host notice does not prove the current latest release.
+            companionUpdate = nil
+            updateCheckMessage = CompanionReleaseError.message(for: error)
         }
     }
 

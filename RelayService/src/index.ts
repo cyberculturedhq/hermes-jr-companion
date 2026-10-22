@@ -32,7 +32,7 @@ export default {
       const ip = request.headers.get("CF-Connecting-IP") ?? "unidentified";
       if (url.pathname === "/v1/companion-release" && request.method === "GET") {
         if (!env.REQUEST_RATE_LIMITER || !(await env.REQUEST_RATE_LIMITER.limit({ key: `release:${ip}` })).success) return failure(429, "rate_limited");
-        return companionRelease(request);
+        return companionRelease(env.COMPANION_RELEASES);
       }
       if (url.pathname === '/v1/app-attest/challenges' && request.method === 'POST') {
         if (env.APP_ATTEST_MODE!=='required') return failure(404,'not_found');

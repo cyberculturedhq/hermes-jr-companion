@@ -16,16 +16,15 @@ class BootstrapTests(unittest.TestCase):
         key = Ed25519PrivateKey.generate()
         commit = 'a' * 40
         signature = base64.b64encode(key.sign(f'hermes-jr-release-v1\n{bootstrap.REPO}\n0.17.0\n{commit}\n'.encode())).decode()
-        release = {'tag_name': 'v0.17.0', 'body': '<!-- hermes-jr-release-v1: ' + signature + ' -->'}
-        def fetch(path):
-            return release if path == '/releases/latest' else {'object': {'sha': commit, 'type': 'commit'}}
-        with patch.object(bootstrap, 'get_json', side_effect=fetch), patch.object(bootstrap, 'PUBLIC_KEY', key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()):
+        release = {'schema': 1, 'version': '0.17.0', 'commit': commit, 'signature': signature}
+        with patch.object(bootstrap, 'get_json', return_value=release) as fetch, patch.object(bootstrap, 'PUBLIC_KEY', key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()):
             self.assertEqual(bootstrap.release()['commit'], commit)
-            commit = 'b' * 40
+            fetch.assert_called_once_with()
+            release['commit'] = 'b' * 40
             with self.assertRaises(Exception): bootstrap.release()
 
     def test_unpublished_or_prerelease_does_not_install(self):
-        for data in [{'tag_name':'v0.16.0'}, {'tag_name':'v0.17.0','prerelease':True}]:
+        for data in [{'schema':1,'version':'0.16.0','commit':'a'*40,'signature':''}, {'schema':1,'version':'0.17.0-beta','commit':'a'*40,'signature':''}, {'schema':2,'version':'0.17.0','commit':'a'*40,'signature':''}]:
             with patch.object(bootstrap, 'get_json', return_value=data), self.assertRaises(ValueError):
                 bootstrap.release()
 
@@ -168,11 +167,11 @@ class BootstrapTests(unittest.TestCase):
 
     def test_rate_limited_release_lookup_reports_the_cause(self):
         import urllib.error
-        error = urllib.error.HTTPError(bootstrap.API, 403, 'Forbidden', {'X-RateLimit-Remaining': '0'}, None)
+        error = urllib.error.HTTPError(bootstrap.FEED, 403, 'Forbidden', {'X-RateLimit-Remaining': '0'}, None)
         with patch.object(bootstrap.urllib.request, 'build_opener') as opener:
             opener.return_value.open.side_effect = error
-            with self.assertRaisesRegex(ValueError, 'rate limited'):
-                bootstrap.get_json('/releases/latest')
+            with self.assertRaisesRegex(ValueError, 'HTTP 403'):
+                bootstrap.get_json()
 
     def check_initial_install(self, complete=False, failure=False, changed=False):
         import contextlib,io,json,shutil,sys,tempfile,types

@@ -2,7 +2,7 @@
 
 For removal, see [Complete removal](#complete-removal).
 
-The bridge checks stable GitHub releases once a day. New Hermes Jr. iOS builds also check the hosted signed release feed on foreground/open and reconnect, with a 15-minute app cache and a five-minute server cache. **Check for updates** in Settings bypasses the app cache. Checks never install code, start model conversations, or restart Hermes. The host’s checks-off preference also disables automatic phone checks on companions that advertise that preference.
+The bridge checks the hosted signed release feed once a day. The iOS app also checks this feed when it opens or reconnects. The app keeps a verified result for 15 minutes. The service reads the current signed record from private Cloudflare R2 storage. Routine checks do not contact GitHub. **Check for updates** in Settings bypasses the app cache. Checks never install code, start model conversations, or restart Hermes. The host’s checks-off preference also disables automatic phone checks on companions that advertise that preference.
 
 The update notice offers **Update with Hermes** or **Copy update prompt**. Update with Hermes starts one new conversation in the default profile and uses the normal model allowance, only after the user taps it. The app remembers that request across reconnects and relaunches; it never automatically resends an uncertain prompt. If an update needs attention, open its conversation before starting another action.
 
@@ -71,7 +71,7 @@ Hermes' package manager resolves changed requirements across every enabled profi
 
 Managed updates support standard, unmodified native installations using the official `.git#plugin` source and Hermes' package manager. Forks, editable installs, linked directories, all-disabled copies, dependency conflicts with other plugins, and protocol/state migrations need release-specific manual instructions. The updater does not silently migrate data.
 
-Checks use stable `vMAJOR.MINOR.PATCH` GitHub releases, not development `main`. The hosted feed contains only a signed version and commit; no device identifiers or model prompts. GitHub receives the host’s network address and a generic user agent, but no pairing or Hermes credentials. Failed checks do not interrupt the bridge. The legacy host notice expires after seven days without a successful check. Guided receipts expire after one day if they have not started and are retained for at most seven days.
+Checks use signed stable releases. The hosted feed contains only a signed version and commit; no device identifiers or model prompts. Cloudflare receives the network address and a generic user agent. Checks send no pairing or Hermes credentials. GitHub supplies native plugin files only during an installation. PyPI supplies the Python package. Failed checks do not interrupt the bridge. The legacy host notice expires after seven days without a successful check. Guided receipts expire after one day if they have not started and are retained for at most seven days.
 
 Before releasing, run Python and Worker checks, build the package, and exercise update and recovery paths. Actual OS lifecycle changes also require runtime tests. Automated tests do not constitute an independent security audit.
 
@@ -99,7 +99,7 @@ python tools/sign_release.py --key /private/path/release-ed25519.pem --version V
 
 Create the `vVERSION` tag at that exact commit, wait for the PyPI publishing
 workflow to succeed and confirm the package is available on PyPI, then include
-the resulting HTML comment unchanged in the GitHub release body. The release-feed workflow validates that signature. The hosted service reads the release and tag from GitHub, verifies the signature, and serves the small JSON feed to the app; neither has the private signing key. Tag rules prevent later moves and
+the resulting HTML comment unchanged in the GitHub release body. The release-feed workflow validates that signature and confirms that the package is available on PyPI. It then sends the signed record to the feed publisher. The publisher verifies the signature before it stores the record in R2. It rejects conflicting versions and prevents a downgrade. The app and companion read the same public endpoint and verify the signature again. No service or workflow has the private signing key. Tag rules prevent later moves and
 deletion. Keep a secure backup of the private key. Key rotation requires a release
 signed by the currently trusted key that ships the next trusted public key;
 losing that key requires a clearly communicated manual reinstall. A GitHub

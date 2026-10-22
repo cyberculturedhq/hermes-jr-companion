@@ -22,26 +22,58 @@ struct CompanionRelease: Codable, Sendable {
     }
 }
 
+enum CompanionReleaseError: Error, LocalizedError {
+    case serviceUnavailable, invalidInformation
+
+    var errorDescription: String? {
+        switch self {
+        case .serviceUnavailable: "The update service is unavailable. Try again later."
+        case .invalidInformation: "The update information could not be verified. Try again later."
+        }
+    }
+
+    static func message(for error: Error) -> String {
+        if (error as? URLError)?.code == .notConnectedToInternet {
+            return "This device is offline. Check its internet connection and try again."
+        }
+        return (error as? CompanionReleaseError)?.localizedDescription
+            ?? "Could not reach the update service. Try again later."
+    }
+}
+
 actor CompanionReleaseFeed {
+    typealias Loader = @Sendable (URLRequest) async throws -> (Data, Int)
     static let shared = CompanionReleaseFeed()
+    private let load: Loader
     private var cached: CompanionRelease?
     private var checked: Date?
+
+    init(load: @escaping Loader = { request in try await CompanionReleaseFeed.download(request) }) { self.load = load }
+
+    private static func download(_ request: URLRequest) async throws -> (Data, Int) {
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else { throw CompanionReleaseError.serviceUnavailable }
+        var data = Data()
+        for try await byte in bytes {
+            guard data.count < 4096 else { throw CompanionReleaseError.invalidInformation }
+            data.append(byte)
+        }
+        return (data, status)
+    }
 
     func latest(force: Bool = false) async throws -> CompanionRelease {
         if !force, let checked, Date().timeIntervalSince(checked) < 900, let cached { return cached }
         var request = URLRequest(url: URL(string: SetupPairing.service + "/v1/companion-release")!)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.timeoutInterval = 12
-        let (bytes, response) = try await URLSession.shared.bytes(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
-            throw HermesError.message("Couldn’t check for updates. Try again later.")
-        }
-        var data = Data()
-        for try await byte in bytes {
-            guard data.count < 4096 else { throw HermesError.message("Invalid update information.") }
-            data.append(byte)
-        }
-        let release = try JSONDecoder().decode(CompanionRelease.self, from: data).verified()
+        let (data, status) = try await load(request)
+        guard status == 200 else { throw CompanionReleaseError.serviceUnavailable }
+        let release: CompanionRelease
+        do {
+            guard data.count <= 4096 else { throw CompanionReleaseError.invalidInformation }
+            release = try JSONDecoder().decode(CompanionRelease.self, from: data).verified()
+        } catch { throw CompanionReleaseError.invalidInformation }
         cached = release; checked = Date()
         return release
     }
