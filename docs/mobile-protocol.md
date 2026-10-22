@@ -65,6 +65,10 @@ contracts validate representative writes without executing them. Modern
 approval and clarification replies exercise Hermes's real request registry.
 Companion tests cover both interaction generations and invalid/stale answers.
 
+The latest release and upstream main use Python 3.14. Current Hermes versions
+require it to install their core dependencies. The two older reference revisions
+use Python 3.11.
+
 `Validation/approval_runtime.py upstream --companion plugin` separately runs the
 production companion socket against Hermes's real capability gate and approval
 registry over disposable loopback WebSockets. It reproduces refusal before
@@ -103,6 +107,11 @@ automatic dismissal, and lease cleanup. State is disposable, outbound network
 is blocked, and the selected upstream revision is verified. This is a renderer
 and transport test; it does not launch Electron or call a model. The encrypted
 Swift/local Worker fixture separately verifies the actual pairing exchange.
+
+For older CLI versions, the test uses the in-process plugin renderer. For newer
+CLI versions, plugins run in the gateway. The test delivers gateway request
+frames to the real CLI modal handlers through an in-memory transport. Both paths
+must render the code and handle phone completion and keyboard cancellation.
 
 ## When a check fails
 
