@@ -77,6 +77,69 @@ def command(job_id, session_id):
         execute, session_id=session_id, task_id=session_id)
 
 
+def gateway_cli_transport(cli):
+    """Connect the real gateway request registry to the real CLI modal handlers.
+
+    New CLI versions execute plugins in the gateway. Replace only the transport
+    with in-memory frame delivery. Do not start a gateway or construct a model.
+    """
+    from hermes_cli.gateway_agent import GatewayAgent
+    from hermes_cli.gateway_session_store import GatewaySessionStore
+    from tui_gateway import server, server_requests
+
+    assert isinstance(cli._session_db, GatewaySessionStore), 'CLI lost its plugin renderer without a gateway session store'
+    assert manager._cli_ref is None, 'Gateway CLI must not install an in-process plugin renderer'
+    sid = 'cli-panel-fixture'
+    with server._sessions_lock:
+        server._sessions[sid] = {'session_key': cli.session_id}
+    frames, replies, events = [], [], []
+    agent = GatewayAgent.__new__(GatewayAgent)
+    agent.clarify_callback = cli._clarify_callback
+    agent.modal_withdraw_callback = cli._withdraw_gateway_modal
+    agent._open_request = None
+
+    def reply(request_id, result):
+        accepted = server_requests.resolve_response({'id': request_id, 'result': result})
+        replies.append((request_id, result, accepted))
+
+    def emit(method, owner, payload):
+        events.append((method, owner, payload))
+        assert owner == sid, (method, owner, payload)
+        if method == 'request.cancel':
+            agent._on_request_withdrawn(payload)
+
+    agent.connection = SimpleNamespace(reply=reply)
+    bind_request_sinks(server_requests, frames.append, emit)
+
+    async def answer():
+        for _ in range(100):
+            if frames:
+                break
+            await asyncio.sleep(.05)
+        else:
+            raise AssertionError('Gateway did not send a CLI pairing request')
+        frame = frames[-1]
+        assert frame['method'] == 'clarify', frame
+        assert frame['params']['session_id'] == sid, frame
+        await asyncio.to_thread(agent._answer_request, frame)
+
+    def settled(cancel):
+        assert len(frames) == len(replies) == 1, (frames, replies)
+        request_id, result, accepted = replies[0]
+        assert request_id == frames[0]['id']
+        if cancel:
+            assert accepted and result['answers'] == {'q1': 'Cancel pairing'}, replies
+        else:
+            assert not accepted, 'A late CLI answer must not replace phone completion'
+            assert events == [('request.cancel', sid, {'id': request_id, 'method': 'clarify', 'reason': 'resolved'})], events
+        assert not server_requests.open_requests(sid)
+        frames.clear()
+        replies.clear()
+        events.clear()
+
+    return answer, settled
+
+
 async def classic():
     from cli import HermesCLI
     from prompt_toolkit.application import Application
@@ -88,6 +151,7 @@ async def classic():
                     base_url='http://127.0.0.1:1/v1', toolsets=['terminal'])
     cli._tui_init_run_state()
     cli.agent = SimpleNamespace(session_id=cli.session_id)
+    gateway = None if manager._cli_ref is cli else gateway_cli_transport(cli)
     kb = cli._tui_build_key_bindings()
     layout, style = cli._tui_build_layout(kb)
     class Output(DummyOutput):
@@ -100,6 +164,7 @@ async def classic():
         for number, cancel in [(1, False), (2, True)]:
             identity = job(number)
             pending = asyncio.create_task(asyncio.to_thread(command, identity, cli.session_id))
+            answering = asyncio.create_task(gateway[0]()) if gateway else None
             for _ in range(100):
                 if pending.done():
                     raise AssertionError('Tool returned before rendering: ' + pending.result())
@@ -120,11 +185,15 @@ async def classic():
             result = json.loads(await asyncio.wait_for(pending, 5))
             value = json.loads(result['output'])
             assert value.get('reason') == 'cancelled' if cancel else value['status'] == 'connected', result
+            if answering:
+                await asyncio.wait_for(answering, 5)
+                gateway[1](cancel)
             assert cli._clarify_state is None
         app.exit()
         await runner
     manager._cli_ref = None
-    report('PASS real CLI renderer + subprocess + middleware: visible code, phone-only completion, keyboard cancellation')
+    route = 'gateway requests' if gateway else 'in-process plugin'
+    report(f'PASS real CLI renderer + {route} + subprocess + middleware: visible code, phone-only completion, keyboard cancellation')
 
 
 async def desktop():
