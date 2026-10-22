@@ -10,5 +10,5 @@
     "types": ["@cloudflare/vitest-plugin/types"],
     "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "worker-configuration.d.ts", "vitest.config.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "worker-configuration.d.ts", "release-feed-configuration.d.ts", "vitest.config.ts"]
 }

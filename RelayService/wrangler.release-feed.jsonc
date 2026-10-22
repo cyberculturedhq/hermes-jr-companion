@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "hermes-jr-release-feed",
+  "account_id": "16f9e43a4889f9f3184c7f94f7daf0bf",
+  "main": "src/release-feed.ts",
+  "compatibility_date": "2026-10-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "hermes-jr-companion.cybercultured.com/v1/companion-release*", "zone_name": "cybercultured.com" }],
+  "r2_buckets": [{ "binding": "COMPANION_RELEASES", "bucket_name": "hermes-jr-release-manifests" }],
+  "secrets": { "required": ["RELEASE_PUBLISH_TOKEN"] },
+  "ratelimits": [{ "name": "REQUEST_RATE_LIMITER", "namespace_id": "71102", "simple": { "limit": 120, "period": 60 } }],
+  "observability": { "enabled": false },
+  "limits": { "cpu_ms": 50 }
+}

@@ -1,3 +1,9 @@
+## Unreleased
+
+- Read signed update records from the persistent Cloudflare R2 feed. Routine checks no longer depend on GitHub API access. PyPI continues to distribute the Python package.
+- Publish release records only after signature and PyPI checks. Preserve the previous record if publication fails. Prevent conflicting versions and downgrades.
+- Show a clear iOS update-service error. Remove stale update notices when a refresh fails.
+
 ## 0.19.1
 
 - Use Python 3.14 to check current Hermes releases and development versions.

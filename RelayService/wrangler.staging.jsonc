@@ -9,6 +9,7 @@
   "preview_urls": false,
   "vars": { "RELAY_ENABLED": "true", "REGISTRATIONS_ENABLED": "true", "APNS_ENVIRONMENT": "both", "APP_ATTEST_MODE": "required", "APP_ATTEST_MAX_KEYS": "5", "APP_ATTEST_APP_ID": "56MTG87283.com.hermesjr.app", "APP_ATTEST_ENVIRONMENT": "production" },
   "secrets": { "required": ["APNS_TEAM_ID", "APNS_KEY_ID", "APNS_TOPIC", "APNS_PRIVATE_KEY", "APNS_PRODUCTION_KEY_ID", "APNS_PRODUCTION_PRIVATE_KEY", "OPERATOR_TOKEN", "SETUP_TICKET_PRIVATE_KEY", "APP_ATTEST_FRAUD_KEY_ID", "APP_ATTEST_FRAUD_PRIVATE_KEY"] },
+  "r2_buckets": [{ "binding": "COMPANION_RELEASES", "bucket_name": "hermes-jr-release-manifests" }],
   "durable_objects": {
     "bindings": [
       { "name": "INSTALLATIONS", "class_name": "InstallationRelay" },

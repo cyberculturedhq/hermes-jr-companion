@@ -8,10 +8,10 @@ import re
 import time
 import aiohttp
 from .service import read_bounded
-from .release_signature import verify, signature_from_body
+from .release_signature import verify
 
 REPOSITORY = 'cyberculturedhq/hermes-jr-companion'
-API = 'https://api.github.com/repos/' + REPOSITORY
+FEED = 'https://hermes-jr-companion.cybercultured.com/v1/companion-release'
 INTERVAL = 24 * 60 * 60
 from . import __version__ as VERSION
 
@@ -32,12 +32,12 @@ def installed_version():
 
 async def get_json(client, url):
     async with client.get(url, allow_redirects=False, timeout=aiohttp.ClientTimeout(total=15),
-                          headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'hermes-jr-companion'}) as response:
+                          headers={'Accept': 'application/json', 'User-Agent': 'hermes-jr-companion'}) as response:
         if response.status == 404:
             return None
         if response.status != 200:
             raise ValueError('Release metadata unavailable')
-        return json.loads(await read_bounded(response, 128_000))
+        return json.loads(await read_bounded(response, 4096))
 
 
 async def check(state, client, *, force=False):
@@ -46,34 +46,20 @@ async def check(state, client, *, force=False):
         return prior
     result = {'checked_at': int(time.time()), 'installed': installed_version(), 'state': 'unavailable'}
     try:
-        release = await get_json(client, API + '/releases/latest')
+        release = await get_json(client, FEED)
         if release is None:
             result['state'] = 'no_stable_release'
         else:
-            tag = release['tag_name']
+            if not isinstance(release, dict) or set(release) != {'schema', 'version', 'commit', 'signature'} or type(release['schema']) is not int or release['schema'] != 1:
+                raise ValueError('Invalid release information')
+            tag = release['version']
+            if not isinstance(tag, str) or len(tag) > 32 or tag.startswith('v'):
+                raise ValueError('Invalid release version')
             latest = version(tag)
-            if release.get('draft') or release.get('prerelease'):
-                raise ValueError('Not a stable release')
-            # Resolve a tag to a commit, including annotated tags. Never follow arbitrary URLs.
-            ref = await get_json(client, API + '/git/ref/tags/' + tag)
-            obj = ref['object']
-            for _ in range(3):
-                sha = obj['sha']
-                if not re.fullmatch('[0-9a-f]{40}', sha):
-                    raise ValueError('Invalid commit')
-                if obj['type'] == 'commit':
-                    break
-                if obj['type'] != 'tag':
-                    raise ValueError('Invalid tag')
-                annotated = await get_json(client, API + '/git/tags/' + sha)
-                obj = annotated['object']
-            else:
-                raise ValueError('Too many tag indirections')
-            signature = signature_from_body(release.get('body'))
-            verify({'latest': tag.lstrip('v'), 'commit': sha, 'signature': signature})
-            result.update(signature=signature, state='available' if latest > version(result['installed']) else 'current',
-                          latest=tag.lstrip('v'), commit=sha,
-                          url='https://github.com/' + REPOSITORY + '/releases/tag/' + tag)
+            verified = {'latest': tag, 'commit': release['commit'], 'signature': release['signature']}
+            verify(verified)
+            result.update(verified, state='available' if latest > version(result['installed']) else 'current',
+                          url='https://github.com/' + REPOSITORY + '/releases/tag/v' + tag)
     except (ValueError, TypeError, KeyError, aiohttp.ClientError, asyncio.TimeoutError, TimeoutError):
         pass  # Do not include raw network errors, metadata, credentials, or URLs in logs.
     state.settings({'update_status': result})

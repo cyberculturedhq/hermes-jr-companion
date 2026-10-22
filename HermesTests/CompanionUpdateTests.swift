@@ -15,6 +15,47 @@ final class CompanionUpdateTests: XCTestCase {
         XCTAssertNil(CompanionUpdateNotice(installed: "0.16.0", latest: "0.17.0-beta"))
     }
 
+    func testFeedCacheAndForcedRefreshUseVerifiedRecords() async throws {
+        actor Loads {
+            var count = 0
+            func next() -> Int { count += 1; return count }
+        }
+        let loads = Loads()
+        let release = CompanionRelease(schema: 1, version: "0.15.0", commit: "904b473331a31367f04b18180aa0770b0a71536d",
+            signature: "yOmmNudsSSmzNb1LZAtVqyZqggfJOknsLQ/E4eD32cIWTtZ3TPYqMTMDb4yphL3DeyVPy26UzaKIGaxXacV0Aw==")
+        let data = try JSONEncoder().encode(release)
+        let feed = CompanionReleaseFeed { request in
+            XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+            let count = await loads.next()
+            return (data, count == 1 ? 200 : 503)
+        }
+        let first = try await feed.latest()
+        let cached = try await feed.latest()
+        XCTAssertEqual(first.version, cached.version)
+        do { _ = try await feed.latest(force: true); XCTFail("Expected service failure") }
+        catch { XCTAssertEqual(CompanionReleaseError.message(for: error), "The update service is unavailable. Try again later.") }
+    }
+
+    func testFeedRejectsInvalidOrOversizedInformation() async {
+        for data in [Data("{}".utf8), Data(repeating: 32, count: 4097)] {
+            let feed = CompanionReleaseFeed { _ in (data, 200) }
+            do { _ = try await feed.latest(); XCTFail("Expected invalid information") }
+            catch { XCTAssertEqual(CompanionReleaseError.message(for: error), "The update information could not be verified. Try again later.") }
+        }
+    }
+
+    @MainActor
+    func testFailedRefreshRemovesStaleHostNoticeAndExplainsServiceFailure() {
+        let store = AppStore()
+        store.installedCompanionVersion = "0.18.1"
+        store.companionUpdate = CompanionUpdateNotice(installed: "0.18.1", latest: "0.19.0")
+        store.applyCompanionRelease(.failure(CompanionReleaseError.serviceUnavailable))
+        XCTAssertNil(store.companionUpdate)
+        XCTAssertEqual(store.updateCheckMessage, "The update service is unavailable. Try again later.")
+        store.applyCompanionRelease(.failure(URLError(.notConnectedToInternet)))
+        XCTAssertEqual(store.updateCheckMessage, "This device is offline. Check its internet connection and try again.")
+    }
+
     func testReceiptSurvivesAppRestartAndOpaqueShellArgumentRoundTrips() throws {
         let receipt = CompanionUpdateReceipt(id: UUID().uuidString.lowercased(), device_id: UUID().uuidString.lowercased(),
             profile: "default", session_id: "conversation-1", target: "0.16.0", notify: false, created: Date().timeIntervalSince1970)

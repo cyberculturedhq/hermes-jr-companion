@@ -164,3 +164,28 @@ limitations, signing-key rotation behavior, and validation.
 `APNS_KEY_ID` and `APNS_PRIVATE_KEY` remain the base credentials (sandbox on the hosted service). To use a separate production-only, topic-specific Apple key, set both optional secrets `APNS_PRODUCTION_KEY_ID` and `APNS_PRODUCTION_PRIVATE_KEY`, then set `APNS_ENVIRONMENT` to `both`. The production key must allow `APNS_TOPIC` and belong to `APNS_TEAM_ID`. A partial production override fails closed; it never falls back to the sandbox key. Without either override, existing self-hosted dual-environment keys retain their current behavior. Provider tokens are cached separately by signing key, including across Durable Object restarts.
 
 Public admission requires automatic Apple verification. See [Apple configuration](../Protocol/APPLE-SETUP.md). A self-hosted private service can explicitly set `APP_ATTEST_MODE=off` and retain the legacy `{}` registration contract. Do not use this bypass on the official public hostname.
+
+## Signed companion release feed
+
+The hosted release feed uses a separate Worker. Its route covers only
+`/v1/companion-release*`. It does not change the relay deployment or its Apple
+credentials. Use `wrangler.release-feed.jsonc` to deploy this Worker.
+
+Create the private R2 bucket `hermes-jr-release-manifests`. Set the Worker secret
+`RELEASE_PUBLISH_TOKEN` and the repository Actions secret
+`RELEASE_FEED_PUBLISH_TOKEN` to the same random 32-byte base64url value. Keep the
+value out of source files and command arguments. The publication token permits
+uploads only after the Worker verifies the pinned release signature. It does
+not permit unsigned releases, changes to an existing version, or downgrades.
+
+The release workflow validates the offline signature and checks PyPI before it
+publishes the record. A failed publication preserves the last valid record.
+A conditional R2 write prevents concurrent publishers from overwriting a newer
+record. Retrying the workflow is safe. Routine GET requests read `latest.json`
+from R2. They do not use GitHub or the edge cache. Each record is at most 4 KiB.
+Missing or invalid records return HTTP 503 with no cached error response.
+
+Deploy only the feed configuration when changing the feed. Deploying the relay
+configuration can also change pairing and app admission. For a self-hosted
+relay, bind `COMPANION_RELEASES` to the same signed-record bucket, or route the
+release path to this separate Worker.
