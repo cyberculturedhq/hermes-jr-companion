@@ -11,6 +11,5 @@
   "r2_buckets": [{ "binding": "COMPANION_RELEASES", "bucket_name": "hermes-jr-release-manifests" }],
   "secrets": { "required": ["RELEASE_PUBLISH_TOKEN"] },
   "ratelimits": [{ "name": "REQUEST_RATE_LIMITER", "namespace_id": "71102", "simple": { "limit": 120, "period": 60 } }],
-  "observability": { "enabled": false },
-  "limits": { "cpu_ms": 50 }
+  "observability": { "enabled": false }
 }
