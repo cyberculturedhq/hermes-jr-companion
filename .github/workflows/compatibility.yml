@@ -31,6 +31,10 @@ jobs:
           # Current releases and main require Python 3.14 for core dependencies.
           # Keep the older reference revisions on their existing Python version.
           python-version: ${{ (matrix.target == 'latest-release' || matrix.target == 'upstream-main') && '3.14' || '3.11' }}
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.11.6'
+          enable-cache: false
       - name: Resolve Hermes revision
         env:
           GH_TOKEN: ${{ github.token }}
@@ -74,7 +78,10 @@ jobs:
       - name: Companion regression tests (standalone fixture environment)
         run: python -m unittest discover -s tests -v
       - name: Install Hermes dependencies (no provider credentials)
-        run: python -m pip install -e './upstream[web]'
+        working-directory: upstream
+        # Read this revision's [tool.uv] overrides, including its Pillow security pin.
+        # Use setup-python's interpreter, which also holds the tested companion.
+        run: uv pip install --system --python "$(command -v python)" -e '.[web]'
       - name: Check real Hermes API with mobile adapter
         working-directory: upstream
         run: python ../tools/compatibility/check.py --production-contracts

@@ -69,6 +69,14 @@ The latest release and upstream main use Python 3.14. Current Hermes versions
 require it to install their core dependencies. The two older reference revisions
 use Python 3.11.
 
+The companion regression tests run before Hermes dependencies are installed.
+The Hermes installation uses pinned `uv` tooling from the upstream checkout
+directory. This reads that revision's `[tool.uv]` settings and dependency
+overrides. For example, current Hermes overrides the browser package's older
+Pillow requirement with its patched Pillow version. The workflow does not copy
+that version into a separate pin or change the upstream source. All runtime,
+pairing, and approval checks still use the selected Python interpreter.
+
 `Validation/approval_runtime.py upstream --companion plugin` separately runs the
 production companion socket against Hermes's real capability gate and approval
 registry over disposable loopback WebSockets. It reproduces refusal before
